@@ -438,7 +438,7 @@ function dayView(date) {
   // Morning review bar (today only): carried-over and unsorted tasks not yet reviewed
   if (date === S.today && !S.triage) {
     var pend = triageItems().length;
-    if (pend) html += '<div class="triagebar"><span><b>' + pend + '</b> to review (carried over or not sorted)</span><button class="btn pri" data-act="triage">Review now</button></div>';
+    if (pend) html += '<div class="triagebar"><span><b>' + pend + '</b> to review (carried over, unsorted or deadlines)</span><button class="btn pri" data-act="triage">Review now</button></div>';
   }
 
   // Must-do strip: all of the day's must-do tasks in one row
@@ -513,60 +513,117 @@ function dayView(date) {
   return html;
 }
 
-// ---- Morning review card -------------------------------------------------------
-// Today's tasks that are carried over or not in a category, and not reviewed yet today.
-function triageItems() {
-  var handled = json(store('triaged:' + S.today), []) || [];
-  return all().filter(function (t) {
-    if (!isTask(t) || t.day !== S.today || t.state === 'done') return false;
-    if (t.parent && S.tasks[t.parent] && S.tasks[t.parent].kind === 'task') return false;
-    if (handled.indexOf(t.id) !== -1) return false;
-    return (t.carried && t.carried < S.today) || !topCat(t);
+// ---- Morning review (all tasks at once, with the coming days next to them) ---------
+// What needs a decision today: carried-over or unsorted tasks on today, overdue deadlines,
+// and deadlines in the next 2 days that aren't planned before the deadline.
+function reviewHandled() { return json(store('triaged:' + S.today), []) || []; }
+function reviewItems() {
+  var handled = reviewHandled(), soon = addDays(S.today, 2), out = [];
+  all().forEach(function (t) {
+    if (!isTask(t) || t.state === 'done' || handled.indexOf(t.id) !== -1) return;
+    if (S.triage && S.triage.skipped[t.id]) return;
+    if (t.parent && S.tasks[t.parent] && S.tasks[t.parent].kind === 'task') return;
+    var why = '';
+    if (t.deadline && t.deadline < S.today) why = 'Overdue: was due ' + shortDate(t.deadline);
+    else if (t.day === S.today && t.carried && t.carried < S.today) why = 'Carried over since ' + shortDate(t.carried);
+    else if (t.day === S.today && !topCat(t)) why = 'Not sorted into a category yet';
+    else if (t.deadline && t.deadline <= soon && (!t.day || t.day > t.deadline)) why = 'Due ' + shortDate(t.deadline) + (t.day ? ', but planned ' + shortDate(t.day) : ', not planned yet');
+    if (why) out.push({ t: t, why: why });
   });
+  return out;
+}
+function triageItems() { return reviewItems(); }
+function markReviewed(ids) {
+  var h = reviewHandled();
+  ids.forEach(function (id) { if (h.indexOf(id) === -1) h.push(id); });
+  store('triaged:' + S.today, JSON.stringify(h));
 }
 function openTriage() {
-  var ids = triageItems().map(function (t) { return t.id; });
   store('card:' + S.today, '1');
-  if (!ids.length) { toast('Nothing to review'); return; }
-  S.triage = { ids: ids, i: 0 };
+  S.triage = { skipped: {}, sel: {} };
+  if (!reviewItems().length) { S.triage = null; toast('Nothing to review'); return; }
   render(); renderTriage();
 }
-function renderTriage() {
-  var old = $('triage'); if (old) old.remove();
-  var tr = S.triage; if (!tr) return;
-  while (tr.i < tr.ids.length && !S.tasks[tr.ids[tr.i]]) tr.i++;
-  if (tr.i >= tr.ids.length) { S.triage = null; toast('Review done'); render(); return; }
-  var t = S.tasks[tr.ids[tr.i]], c = topCat(t), carried = t.carried && t.carried < S.today;
-  var d = document.createElement('div'); d.className = 'overlay'; d.id = 'triage';
-  d.innerHTML = '<div class="card" role="dialog" aria-modal="true" aria-label="Morning review">' +
-    '<div class="cardhead"><span class="meta">Morning review · ' + (tr.i + 1) + ' of ' + tr.ids.length + '</span><button class="linkbtn" data-tg="close">Finish later</button></div>' +
-    '<div class="big">' + linkify(t.text) + '</div>' +
-    '<div class="meta">' + (carried ? 'Carried over since ' + esc(shortDate(t.carried)) : 'Not sorted into a category yet') + (c ? ' · ' + esc(pathText(t)) : '') + (t.deadline ? ' · due ' + esc(shortDate(t.deadline)) : '') + '</div>' +
-    (!c ? '<label class="meta">Put in category <select id="tg_cat"><option value="">(none)</option>' + categories(t.list).map(function (x) { return '<option value="' + x.t.id + '">' + '· '.repeat(x.depth) + esc(x.t.text) + '</option>'; }).join('') + '</select></label>' : '') +
-    '<div class="row"><button class="btn pri" data-tg="today">Keep today</button><button class="btn" data-tg="tomorrow">Tomorrow</button><button class="btn" data-tg="mon">Next Monday</button>' +
-    '<input type="date" id="tg_date" aria-label="Pick a day"><button class="btn" data-tg="nodate">No date</button></div>' +
-    '<div class="row"><button class="btn" data-tg="done">Already done</button><button class="btn warn" data-tg="delete">Delete</button><button class="linkbtn" data-tg="skip">Skip</button></div></div>';
-  document.body.appendChild(d);
-  var first = d.querySelector('[data-tg="today"]'); if (first) first.focus();
+// The days shown on the left: today to Friday, Saturday, Sunday (on a weekend: today and Sunday).
+function reviewDays() {
+  var days = [], d = S.today, g = 0;
+  while (g++ < 8) { days.push(d); if (dow(d) === 0) break; d = addDays(d, 1); }
+  return days;
 }
-function triageAct(a, val) {
+function renderTriage() {
+  var old = $('triage'), keepScroll = old ? [old.querySelector('.rv-days') && old.querySelector('.rv-days').scrollTop, old.querySelector('.rv-list') && old.querySelector('.rv-list').scrollTop] : null;
+  if (old) old.remove();
+  var tr = S.triage; if (!tr) return;
+  var items = reviewItems();
+  Object.keys(tr.sel).forEach(function (id) { if (!items.some(function (x) { return x.t.id === id; })) delete tr.sel[id]; });
+  var nSel = Object.keys(tr.sel).length;
+  var reviewIds = {}; items.forEach(function (x) { reviewIds[x.t.id] = true; });
+
+  // Left: the coming days with what's already planned (drop a task on a day to move it there)
+  var left = reviewDays().map(function (d) {
+    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && t.day === d && t.state !== 'done' && !reviewIds[t.id]; })
+      .sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1) || Number(a.pos) - Number(b.pos); });
+    var musts = ts.filter(function (t) { return t.must; }).length;
+    return '<div class="rv-day' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h4>' + (d === S.today ? 'Today · ' : '') + esc(shortDate(d)) +
+      '<em>' + ts.filter(isTask).length + ' tasks' + (musts ? ' · ' + musts + ' must' : '') + '</em></h4>' +
+      (ts.length ? '<ul>' + ts.map(function (t) {
+        return '<li class="' + (t.must ? 'must' : '') + (t.kind === 'event' ? ' ev' : '') + '"' + (colorOf(t) ? ' style="border-left-color:var(--t' + colorOf(t) + 't)"' : '') + '>' + (t.time ? '<b>' + esc(t.time) + '</b> ' : '') + esc(t.text) + '</li>';
+      }).join('') + '</ul>' : '<span class="empty">Nothing planned</span>') + '</div>';
+  }).join('') +
+    '<div class="rv-day nodate" data-drop="day" data-day=""><h4>No date<em>stays in the list</em></h4></div>';
+
+  // Right: everything to review, each with the same buttons
+  var right = items.length ? items.map(function (x) {
+    var t = x.t, c = topCat(t);
+    return '<div class="rv-item' + (tr.sel[t.id] ? ' sel' : '') + '" draggable="true" data-id="' + t.id + '" data-dl="' + esc(t.deadline) + '">' +
+      '<div class="rv-top"><input type="checkbox" data-tgsel="' + t.id + '"' + (tr.sel[t.id] ? ' checked' : '') + ' aria-label="Select"><div class="rv-text"><b>' + linkify(t.text) + '</b>' +
+      '<span class="meta">' + esc(x.why) + (c ? ' · ' + esc(pathText(t)) : '') + (t.deadline && x.why.indexOf('ue ') === -1 ? ' · due ' + esc(shortDate(t.deadline)) : '') + '</span></div></div>' +
+      (!c ? '<label class="meta rv-cat">Category <select data-tgcat="' + t.id + '"><option value="">(none)</option>' + categories(t.list).map(function (k) { return '<option value="' + k.t.id + '">' + '· '.repeat(k.depth) + esc(k.t.text) + '</option>'; }).join('') + '</select></label>' : '') +
+      '<div class="row">' +
+      '<button class="btn pri" data-tg="today" data-id="' + t.id + '">' + (t.day === S.today ? 'Keep today' : 'Today') + '</button><button class="btn" data-tg="tomorrow" data-id="' + t.id + '">Tomorrow</button><button class="btn" data-tg="mon" data-id="' + t.id + '">Next Mon</button>' +
+      '<input type="date" data-tgdate="' + t.id + '" aria-label="Pick a day"><button class="btn" data-tg="nodate" data-id="' + t.id + '">No date</button>' +
+      '<button class="btn" data-tg="done" data-id="' + t.id + '">Done</button><button class="btn warn" data-tg="delete" data-id="' + t.id + '">Delete</button><button class="linkbtn" data-tg="skip" data-id="' + t.id + '">Skip</button></div></div>';
+  }).join('') : '<div class="empty rv-empty">All reviewed ✓</div>';
+
+  var d = document.createElement('div'); d.className = 'overlay'; d.id = 'triage';
+  d.innerHTML = '<div class="card rv" role="dialog" aria-modal="true" aria-label="Morning review">' +
+    '<div class="cardhead"><b>Morning review</b><span class="meta">' + items.length + ' to review · drag a task onto a day, or use its buttons</span><button class="btn pri" data-tg="close">' + (items.length ? 'Finish later' : 'Close') + '</button></div>' +
+    '<div class="rv-grid"><div class="rv-days">' + left + '</div><div class="rv-side">' +
+    (nSel ? '<div class="rv-bulk"><b>' + nSel + ' selected:</b><button class="btn" data-tgbulk="today">Today</button><button class="btn" data-tgbulk="tomorrow">Tomorrow</button><button class="btn" data-tgbulk="mon">Next Mon</button><button class="btn" data-tgbulk="nodate">No date</button><button class="btn" data-tgbulk="done">Done</button><button class="btn warn" data-tgbulk="delete">Delete</button><button class="linkbtn" data-tgbulk="clear">Clear</button></div>' :
+      (items.length > 1 ? '<div class="rv-bulk meta"><button class="linkbtn" data-tgbulk="all">Select all</button></div>' : '')) +
+    '<div class="rv-list">' + right + '</div></div></div></div>';
+  document.body.appendChild(d);
+  if (keepScroll) { var a = d.querySelector('.rv-days'), b = d.querySelector('.rv-list'); if (a) a.scrollTop = keepScroll[0] || 0; if (b) b.scrollTop = keepScroll[1] || 0; }
+}
+// One review action on one task (or, with ids, on several).
+function triageAct(a, val, id, ids) {
   var tr = S.triage; if (!tr) return;
   if (a === 'close') { S.triage = null; renderTriage(); render(); return; }
-  var id = tr.ids[tr.i], t = S.tasks[id];
-  if (t) {
-    var catEl = $('tg_cat'), cat = catEl ? catEl.value : '';
+  ids = ids || [id];
+  if (a === 'skip') { ids.forEach(function (x) { tr.skipped[x] = true; }); renderTriage(); return; }
+  var list = [];
+  ids.forEach(function (x) {
+    var t = S.tasks[x]; if (!t) return;
+    var catEl = document.querySelector('[data-tgcat="' + x + '"]'), cat = catEl ? catEl.value : '';
     var extra = cat && S.tasks[cat] ? { parent: cat, list: S.tasks[cat].list } : {};
-    if (a === 'today') change([[id, Object.assign({ carried: '' }, extra)]]);
-    else if (a === 'tomorrow') moveTo([id], addDays(S.today, 1), extra);
-    else if (a === 'mon') moveTo([id], nextWeekday(1), extra);
-    else if (a === 'date') moveTo([id], val, extra);
-    else if (a === 'nodate') moveTo([id], '', extra);
-    else if (a === 'done') change([[id, Object.assign({ state: 'done' }, extra)]]);
-    else if (a === 'delete') change([[id, null]]);
-    if (a !== 'skip') { var h = json(store('triaged:' + S.today), []) || []; h.push(id); store('triaged:' + S.today, JSON.stringify(h)); }
-  }
-  tr.i++; renderTriage();
+    var day = { today: S.today, tomorrow: addDays(S.today, 1), mon: nextWeekday(1), nodate: '', date: val }[a];
+    if (a === 'done') list.push([x, Object.assign({ state: 'done' }, extra)]);
+    else if (a === 'delete') list.push([x, null]);
+    else if (day !== undefined) list.push([x, Object.assign({ day: day, carried: '', span: '' }, extra)]);
+  });
+  if (list.length) change(list);
+  markReviewed(ids);
+  ids.forEach(function (x) { delete tr.sel[x]; });
+  renderTriage();
 }
+// Deadline hint: while the mouse is on a task with a deadline, days after it are greyed out.
+document.addEventListener('mouseover', function (e) {
+  var it = e.target.closest('.rv-item'), box = $('triage'); if (!box) return;
+  var dl = it ? it.dataset.dl : '';
+  box.querySelectorAll('.rv-day[data-day]').forEach(function (dEl) {
+    dEl.classList.toggle('late', !!(dl && dEl.dataset.day && dEl.dataset.day > dl));
+  });
+});
 
 // ---- Small date picker (date chips and the calendar button) -----------------------
 function openDatePop(id, field, anchor) {
@@ -965,7 +1022,7 @@ function showResults(q) {
 
 // ---- Clicks (one listener for the whole page) ---------------------------------------
 document.addEventListener('click', function (e) {
-  var el = e.target.closest('[data-act],[data-mv],[data-mact],[data-dp],[data-tg],[data-look],[data-mcolor]');
+  var el = e.target.closest('[data-act],[data-mv],[data-mact],[data-dp],[data-tg],[data-tgbulk],[data-look],[data-mcolor]');
   var menu = $('menu');
   if (menu && !e.target.closest('#menu') && !(el && el.dataset.act === 'menu')) closeMenu();
   if (!e.target.closest('#results') && e.target.id !== 'search') { var r = $('results'); if (r) r.remove(); }
@@ -974,7 +1031,14 @@ document.addEventListener('click', function (e) {
   if (!el) return;
 
   // Morning review card
-  if (el.dataset.tg) { triageAct(el.dataset.tg); return; }
+  if (el.dataset.tg) { triageAct(el.dataset.tg, null, el.dataset.id); return; }
+  if (el.dataset.tgbulk && S.triage) {
+    var tb = el.dataset.tgbulk, selIds = Object.keys(S.triage.sel);
+    if (tb === 'clear') { S.triage.sel = {}; renderTriage(); }
+    else if (tb === 'all') { reviewItems().forEach(function (x) { S.triage.sel[x.t.id] = true; }); renderTriage(); }
+    else if (selIds.length) triageAct(tb, null, null, selIds);
+    return;
+  }
   // Date picker buttons
   if (el.dataset.dp !== undefined && menu) { applyDate(menu.dataset.id, menu.dataset.f, bulkTarget(el.dataset.dp)); return; }
   // Look settings
@@ -1091,7 +1155,8 @@ document.addEventListener('change', function (e) {
   var el = e.target;
   if (el.id === 'bulkdate' && el.value) { moveTo(Object.keys(S.sel), el.value); S.sel = {}; render(); }
   if (el.id === 'dp_in' && el.value) { var mm = $('menu'); if (mm) applyDate(mm.dataset.id, mm.dataset.f, el.value); }
-  if (el.id === 'tg_date' && el.value) triageAct('date', el.value);
+  if (el.dataset.tgdate && el.value) triageAct('date', el.value, el.dataset.tgdate);
+  if (el.dataset.tgsel && S.triage) { if (el.checked) S.triage.sel[el.dataset.tgsel] = true; else delete S.triage.sel[el.dataset.tgsel]; renderTriage(); }
   if (el.dataset.setting) { saveSetting(el.dataset.setting, el.value); }
   if (el.dataset.field) { var p = {}; p[el.dataset.field] = el.value; change([[el.dataset.id, p]]); }
 });
@@ -1163,6 +1228,12 @@ document.addEventListener('drop', function (e) {
     clearTimeout(tabTimer); tabTimerV = '';
     S.view = tgt.dataset.v; S.sel = {}; ids.forEach(function (x) { S.sel[x] = true; }); render();
     toast('Selected: drag it onto a day, or use the bar below');
+    return;
+  }
+  if (S.triage && tgt.closest('#triage')) {
+    // Dropped in the morning review: move it (and the other selected ones) to that day.
+    var rids = S.triage.sel[dragId] ? Object.keys(S.triage.sel) : [dragId];
+    if (kind === 'day') { triageAct('date', tgt.dataset.day, null, rids); }
     return;
   }
   if (kind === 'day') moveTo(ids, tgt.dataset.day, { span: '' });
