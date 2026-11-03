@@ -1,0 +1,11 @@
+/* Connect screen (GitHub Pages version only). Uses the colours from styles.css. */
+.connect { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.connect[hidden] { display: none; }
+.connect-box { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px; display: flex; flex-direction: column; gap: 8px; color: var(--ink); font-family: var(--font); }
+.connect-box h1 { margin: 0 0 4px; font-size: 1.3rem; }
+.connect-box p { margin: 0 0 6px; color: var(--muted); font-size: .9rem; }
+.connect-box label { font-weight: 700; font-size: .85rem; margin-top: 6px; }
+.connect-box input { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.connect-box .btn { margin-top: 10px; align-self: flex-start; }
+.connect-err { color: var(--danger) !important; }
+.connect-note { font-size: .8rem !important; color: var(--faint) !important; }
