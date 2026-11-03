@@ -32,6 +32,21 @@
       <label for="qa">+</label>
       <input id="qa" autocomplete="off" placeholder="Add a task. Enter puts it on the day you're looking at. Words: tomorrow, fri, 09:15, ! (must), due 15/11, #tag or #category">
       <span class="kbd" id="kbdhint"></span>
+      <span class="help"><button class="q" type="button" aria-label="How to write a quick task">?</button>
+        <span class="pop" role="tooltip"><b>Quick add: type a task, then press Enter</b>
+          <table>
+            <tr><td><code>!</code></td><td>must do</td></tr>
+            <tr><td><code>14:00</code></td><td>fixed time (shows under Fixed times)</td></tr>
+            <tr><td><code>today</code> <code>tomorrow</code></td><td>which day</td></tr>
+            <tr><td><code>mon</code> … <code>sun</code></td><td>the next one of that weekday</td></tr>
+            <tr><td><code>nodate</code></td><td>no day (stays in the list)</td></tr>
+            <tr><td><code>due 15/11</code></td><td>deadline</td></tr>
+            <tr><td><code>#Category</code></td><td>put it in a category (suggestions appear)</td></tr>
+            <tr><td><code>#tag</code></td><td>a tag (any word that isn't a category)</td></tr>
+          </table>
+          Example: <code>Email supervisor tomorrow 10:00 ! #Research</code>
+          <p>Without a day word, the task goes on the day you're looking at. In the Lists view it gets no day.</p>
+        </span></span>
     </div>
   </div>
 </div>

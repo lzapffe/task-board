@@ -53,7 +53,7 @@
       withSuccessHandler: function (f) { return runner(f, fail); },
       withFailureHandler: function (g) { return runner(ok, g); }
     };
-    ['api_getData', 'api_save', 'api_resolveArrival', 'api_saveSettings', 'api_runUpdate'].forEach(function (name) {
+    ['api_getData', 'api_save', 'api_resolveArrival', 'api_saveSettings', 'api_runUpdate', 'api_getArchive'].forEach(function (name) {
       r[name] = function () { call(name, Array.prototype.slice.call(arguments), ok, fail); };
     });
     return r;
@@ -64,6 +64,9 @@
   function el(id) { return document.getElementById(id); }
   function showConnect(err) {
     var box = el('connect'); if (!box) return;
+    // Already open: keep what you've typed (switching to another app and back
+    // used to clear the fields). Only update the message.
+    if (!box.hidden) { if (err) { el('cErr').hidden = false; el('cErr').textContent = err; } return; }
     box.hidden = false;
     el('cUrl').value = get(URL_KEY);
     el('cKey').value = '';
