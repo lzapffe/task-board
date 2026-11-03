@@ -368,9 +368,11 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 
 /* ---- Quick-add help ("?") ---- */
 .help { position: relative; flex: none; }
-.help .q { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-weight: 800; cursor: help; }
+.help .q { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-weight: 800; cursor: pointer; display: grid; place-items: center; list-style: none; user-select: none; }
+.help .q::-webkit-details-marker { display: none; }
+.help[open] .q { border-color: var(--accent); color: var(--accent); }
 .help .pop { display: none; position: absolute; bottom: 34px; right: 0; width: 340px; max-width: calc(100vw - 32px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 0.84rem; z-index: 60; }
-.help:hover .pop, .help:focus-within .pop { display: block; }
+.help[open] .pop { display: block; }
 .pop table { border-collapse: collapse; width: 100%; margin: 6px 0; }
 .pop td { padding: 3px 6px 3px 0; vertical-align: top; }
 .pop td:first-child { white-space: nowrap; }

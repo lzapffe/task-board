@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css">
-<link rel="stylesheet" href="connect.css">
+<link rel="stylesheet" href="styles.css?v=rev2b">
+<link rel="stylesheet" href="connect.css?v=rev2b">
 </head>
 <body>
 <div class="app" id="app">
@@ -32,8 +32,8 @@
       <label for="qa">+</label>
       <input id="qa" autocomplete="off" placeholder="Add a task. Enter puts it on the day you're looking at. Words: tomorrow, fri, 09:15, ! (must), due 15/11, #tag or #category">
       <span class="kbd" id="kbdhint"></span>
-      <span class="help"><button class="q" type="button" aria-label="How to write a quick task">?</button>
-        <span class="pop" role="tooltip"><b>Quick add: type a task, then press Enter</b>
+      <details class="help"><summary class="q" aria-label="How to write a quick task" title="How to write a quick task">?</summary>
+        <span class="pop"><b>Quick add: type a task, then press Enter</b>
           <table>
             <tr><td><code>!</code></td><td>must do</td></tr>
             <tr><td><code>14:00</code></td><td>fixed time (shows under Fixed times)</td></tr>
@@ -46,7 +46,7 @@
           </table>
           Example: <code>Email supervisor tomorrow 10:00 ! #Research</code>
           <p>Without a day word, the task goes on the day you're looking at. In the Lists view it gets no day.</p>
-        </span></span>
+        </span></details>
     </div>
   </div>
 </div>
@@ -67,7 +67,7 @@
   </form>
 </div>
 
-<script src="connect.js"></script>
-<script src="app.js"></script>
+<script src="connect.js?v=rev2b"></script>
+<script src="app.js?v=rev2b"></script>
 </body>
 </html>

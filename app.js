@@ -969,6 +969,7 @@ document.addEventListener('click', function (e) {
   var menu = $('menu');
   if (menu && !e.target.closest('#menu') && !(el && el.dataset.act === 'menu')) closeMenu();
   if (!e.target.closest('#results') && e.target.id !== 'search') { var r = $('results'); if (r) r.remove(); }
+  var hp = document.querySelector('details.help[open]'); if (hp && !e.target.closest('details.help')) hp.open = false;
   if (e.target.closest('a.lnk')) return;   // links open normally
   if (!el) return;
 
