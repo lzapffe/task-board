@@ -1,8 +1,8 @@
 /* Task board styles (same as the Apps Script page). */
 /* ---- Colours: navy theme with orange accents; done = green, started = gold in both modes ---- */
 :root {
-  --bg: #0E1630; --surface: #142043; --surface2: #1B2A55; --line: #26355F;
-  --ink: #EEF1F8; --muted: #9AA6C4; --faint: #6E7A9A; --accent: #F0954F; --must: #F5A86A;
+  --bg: #0E1630; --surface: #17244A; --surface2: #22346A; --line: #34467A;
+  --ink: #F3F5FB; --muted: #B7C1DB; --faint: #8F9BBA; --accent: #F0954F; --must: #F5A86A;
   --done: #7FBF95; --started: #D8C38A; --danger: #F0A3AE;
   --t1f: rgba(217,103,122,.16); --t1t: #F0A3AE; --t2f: rgba(216,195,138,.16); --t2t: #E3D2A2;
   --t3f: rgba(127,191,149,.16); --t3t: #9BD3AE; --t4f: rgba(138,164,230,.18); --t4t: #AFC2F2;
@@ -106,7 +106,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tx { min-width: 0; flex: 1; display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: center; font-size: 0.94rem; }
 .tx .t { cursor: text; overflow-wrap: anywhere; }
 .task.must .tx .t { font-weight: 800; color: var(--must); }
-.task[data-s="done"] .tx { opacity: .45; }
+.task[data-s="done"] .tx { opacity: .55; }
 .task[data-s="done"] .tx .t { text-decoration: line-through; }
 .t[contenteditable="true"] { outline: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; background: var(--bg); }
 .tag { border-radius: 999px; padding: 0 9px; font-size: 0.72rem; font-weight: 700; line-height: 1.6; border: 1px solid currentColor; white-space: nowrap; }
@@ -437,6 +437,8 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
   .rv-days, .rv-list { overflow: visible; }
   .card.rv { overflow: auto; }
 }
+
+.subhdr { list-style: none; font-size: 0.78rem; font-weight: 800; color: var(--muted); padding: 8px 6px 2px; border-bottom: 1px dashed var(--line); }
 
 /* ---- Print: leave out the new on-screen helpers ---- */
 @media print {

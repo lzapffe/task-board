@@ -70,6 +70,8 @@ function tagsOf(t) { return String(t.tags || '').split(',').map(function (x) { r
 function hasTag(t, tag) { return tagsOf(t).some(function (x) { return x.toLowerCase() === tag; }); }
 function all() { return Object.keys(S.tasks).map(function (k) { return S.tasks[k]; }); }
 function isTask(t) { return t.kind === 'task'; }
+// A fixed time, shown with an en dash when it has an end ("13:00-14:00" -> "13:00–14:00").
+function timeText(s) { return esc(String(s || '').replace('-', '–')); }
 
 // Links in task text and details become clickable (shown as the site name).
 function linkify(text) {
@@ -433,7 +435,7 @@ function dayView(date) {
   var events = tasks.filter(function (t) { return t.kind === 'event'; }).sort(function (a, b) { return a.time < b.time ? -1 : 1; });
   var ord = orderIndex();
   var onDay = {}; tasks.forEach(function (t) { onDay[t.id] = true; });
-  var html = '<div class="printhead"><h2>' + esc(longDate(date)) + '</h2><p>' + events.map(function (e) { return '<b>' + esc(e.time) + '</b> ' + esc(e.text); }).join(' · ') + '</p></div>';
+  var html = '<div class="printhead"><h2>' + esc(longDate(date)) + '</h2><p>' + events.map(function (e) { return '<b>' + timeText(e.time) + '</b> ' + esc(e.text); }).join(' · ') + '</p></div>';
 
   // Morning review bar (today only): carried-over and unsorted tasks not yet reviewed
   if (date === S.today && !S.triage) {
@@ -448,7 +450,7 @@ function dayView(date) {
 
   // Fixed times
   html += '<div class="block"><div class="bh">Fixed times</div><div class="fixed">' +
-    (events.length ? events.map(function (e) { return '<div class="ev"><b>' + esc(e.time) + '</b>' + linkify(e.text) + '<button data-act="menu" data-id="' + e.id + '" aria-label="Edit">⋯</button></div>'; }).join('') : '<span class="empty">Nothing fixed. Add one with a time, like "Meeting 13:00".</span>') + '</div></div>';
+    (events.length ? events.map(function (e) { return '<div class="ev"><b>' + timeText(e.time) + '</b>' + linkify(e.text) + '<button data-act="menu" data-id="' + e.id + '" aria-label="Edit">⋯</button></div>'; }).join('') : '<span class="empty">Nothing fixed. Add one with a time, like "Meeting 13:00".</span>') + '</div></div>';
 
   // Group the day's tasks: carried over, not sorted yet, then one block per top category.
   // Done tasks leave their block (after a short moment) and go to "Done today" at the bottom.
@@ -475,14 +477,17 @@ function dayView(date) {
   keys.forEach(function (k) {
     var g = groups[k], isCatBlock = k !== 'carried' && k !== 'unsorted';
     var doneN = g.done + g.list.filter(function (t) { return t.state === 'done'; }).length, total = g.done + g.list.length;
-    var ctl = isCatBlock ? '<span class="ctl"><button data-act="up" data-k="' + k + '" aria-label="Move block up">↑</button><button data-act="down" data-k="' + k + '" aria-label="Move block down">↓</button></span>' :
+    var grouped = isCatBlock && (json(store('grp'), {}) || {})[k];
+    var ctl = isCatBlock ? '<span class="ctl"><button data-act="grp" data-k="' + k + '" title="Show subheadings for subcategories in this block">' + (grouped ? 'Ungroup' : 'Group by subcategory') + '</button><button data-act="up" data-k="' + k + '" aria-label="Move block up">↑</button><button data-act="down" data-k="' + k + '" aria-label="Move block down">↓</button></span>' :
       (k === 'carried' ? '<span class="ctl"><button data-act="carryall">Move all to ' + (date === S.today ? 'tomorrow' : 'today') + '</button></span>' : '');
     html += '<div class="block" data-key="' + k + '" data-drop="block" data-cat="' + (isCatBlock ? k : '') + '"' + (isCatBlock ? ccStyle(catColor(S.tasks[k])) : '') + '><div class="bh">' +
       (isCatBlock ? ring(doneN, total) : '') + '<span>' + esc(g.title) + '</span>' + (isCatBlock && !g.list.length ? '<span class="alldone">All done ✓</span>' : '') + ctl + '</div><ul class="tasks">';
-    g.list.forEach(function (t) {
-      var c = topCat(t);
-      var sub = S.tasks[t.parent] && S.tasks[t.parent].kind !== 'task' && (!c || S.tasks[t.parent].id !== c.id) ? S.tasks[t.parent].text : '';
-      html += taskRow(t, 0, { showPath: !isCatBlock, hideBreak: true, sub: isCatBlock ? sub : '' });
+    // With "Group by subcategory" on: tasks sorted under a subheading per subcategory (path below the top category).
+    var rows = g.list, lastSub = null;
+    if (grouped) rows = g.list.slice().sort(function (a, b) { var x = subPath(a), y = subPath(b); return x === y ? 0 : (x === '' ? -1 : y === '' ? 1 : (x < y ? -1 : 1)); });
+    rows.forEach(function (t) {
+      if (grouped) { var sp = subPath(t); if (sp !== lastSub) { lastSub = sp; if (sp) html += '<li class="subhdr">' + esc(sp) + '</li>'; } }
+      html += taskRow(t, 0, { showPath: !isCatBlock, hideBreak: true });
       (function subs(parent, level) {
         kids(parent.list, parent.id).forEach(function (s) {
           if (!isTask(s)) return;
@@ -513,6 +518,12 @@ function dayView(date) {
   return html;
 }
 
+// The category path of a task below its top category ("Publications" or "Publications › Drafts"); '' if directly in it.
+function subPath(t) {
+  var names = [], p = S.tasks[t.parent], g = 0;
+  while (p && g++ < 20) { if (p.kind !== 'task') names.unshift(p.text); p = S.tasks[p.parent]; }
+  return names.slice(1).join(' › ');
+}
 // ---- Morning review (all tasks at once, with the coming days next to them) ---------
 // What needs a decision today: carried-over or unsorted tasks on today, overdue deadlines,
 // and deadlines in the next 2 days that aren't planned before the deadline.
@@ -567,7 +578,7 @@ function renderTriage() {
     return '<div class="rv-day' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h4>' + (d === S.today ? 'Today · ' : '') + esc(shortDate(d)) +
       '<em>' + ts.filter(isTask).length + ' tasks' + (musts ? ' · ' + musts + ' must' : '') + '</em></h4>' +
       (ts.length ? '<ul>' + ts.map(function (t) {
-        return '<li class="' + (t.must ? 'must' : '') + (t.kind === 'event' ? ' ev' : '') + '"' + (colorOf(t) ? ' style="border-left-color:var(--t' + colorOf(t) + 't)"' : '') + '>' + (t.time ? '<b>' + esc(t.time) + '</b> ' : '') + esc(t.text) + '</li>';
+        return '<li class="' + (t.must ? 'must' : '') + (t.kind === 'event' ? ' ev' : '') + '"' + (colorOf(t) ? ' style="border-left-color:var(--t' + colorOf(t) + 't)"' : '') + '>' + (t.time ? '<b>' + timeText(t.time) + '</b> ' : '') + esc(t.text) + '</li>';
       }).join('') + '</ul>' : '<span class="empty">Nothing planned</span>') + '</div>';
   }).join('') +
     '<div class="rv-day nodate" data-drop="day" data-day=""><h4>No date<em>stays in the list</em></h4></div>';
@@ -669,7 +680,7 @@ function weekView() {
     var d = addDays(mon, i);
     var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && t.day === d; }).sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1); });
     html += '<div class="wcol' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h3 data-act="goday" data-d="' + d + '">' + shortDate(d) + '<em>' + ts.filter(isTask).length + '</em></h3>' +
-      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.state === 'done' ? ' done' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? esc(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
+      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.state === 'done' ? ' done' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
   }
   return html + '</div>';
 }
@@ -752,7 +763,7 @@ function planColumns() {
       .sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1); });
     var musts = ts.filter(function (t) { return t.must; }).length;
     html += '<div class="pcol' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h3 data-act="goday" data-d="' + d + '">' + shortDate(d) + '<em>' + ts.filter(isTask).length + ' tasks' + (musts ? ' · ' + musts + ' must' : '') + '</em></h3>' +
-      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? esc(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
+      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
   }
   return html + '</div><div class="planextra"><div class="dbox" data-drop="weekend" data-day="' + addDays(mon, 5) + '"><b>Weekend<em></em></b></div><div class="dbox" data-drop="day" data-day="' + addDays(mon, 7) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div></div>';
 }
@@ -907,8 +918,11 @@ function openMenu(id, anchor) {
   var isCat = t.kind === 'category' || t.kind === 'header';
   m.innerHTML = (isCat ? '' :
     '<div class="row"><button class="btn" data-mv="today">Today</button><button class="btn" data-mv="tomorrow">Tomorrow</button><button class="btn" data-mv="mon">Next Mon</button><button class="btn" data-mv="week">+1 week</button><button class="btn" data-mv="sat">Saturday</button><button class="btn" data-mv="">No date</button></div>' +
-    '<div class="two"><label>Day<input type="date" id="m_day" value="' + esc(t.day) + '"></label><label>Time (fixed)<input type="time" id="m_time" value="' + esc(t.time) + '"></label></div>') +
+    '<div class="two"><label>Day<input type="date" id="m_day" value="' + esc(t.day) + '"></label><label>Starts (fixed time)<input type="time" id="m_time" value="' + esc(String(t.time).split('-')[0]) + '"></label></div>' +
+    '<div class="two"><span></span><label>Ends (optional)<input type="time" id="m_end" value="' + esc(String(t.time).split('-')[1] || '') + '"></label></div>') +
     '<label>Text<textarea id="m_text" rows="2">' + esc(t.text) + '</textarea></label>' +
+    (isCat ? '<label>' + (t.kind === 'category' ? 'Inside (parent category)' : 'Label inside') + '<select id="m_parent">' + (t.kind === 'category' ? '<option value="">(Top level)</option>' : '') +
+      categories(t.list).filter(function (c) { return c.t.id !== t.id && descendants(t.id).indexOf(c.t.id) === -1; }).map(function (c) { return '<option value="' + c.t.id + '"' + (t.parent === c.t.id ? ' selected' : '') + '>' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('') + '</select></label>' : '') +
     (t.kind === 'category' ? '<label>Sort tasks by<select id="m_sort">' + Object.keys(SORTS).map(function (k) { return '<option value="' + k + '"' + ((t.sort || 'own') === k ? ' selected' : '') + '>' + SORTS[k] + '</option>'; }).join('') + '</select></label>' +
       '<label>Colour</label><span class="swatches">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<button class="g' + n + (catColor(t) === n ? ' on' : '') + '" data-mcolor="' + n + '" aria-label="Colour ' + n + '"></button>'; }).join('') + '</span>' : '') +
     (isCat ? '' :
@@ -934,7 +948,7 @@ function menuSave(id) {
   var t = S.tasks[id], v = function (x) { var el = $(x); return el ? el.value : undefined; };
   var patch = { text: v('m_text').trim() || t.text };
   if (t.kind === 'task' || t.kind === 'event') {
-    patch.day = v('m_day'); patch.time = v('m_time'); patch.kind = v('m_time') ? 'event' : 'task';
+    patch.day = v('m_day'); patch.time = v('m_time') ? v('m_time') + (v('m_end') ? '-' + v('m_end') : '') : ''; patch.kind = v('m_time') ? 'event' : 'task';
     patch.deadline = v('m_dl'); patch.count_of = Number(v('m_cnt')) > 0 ? v('m_cnt') : '';
     if (patch.count_of && !t.count) patch.count = '0';
     patch.tags = v('m_tags'); patch.note = v('m_note'); patch.details = v('m_det');
@@ -946,7 +960,11 @@ function menuSave(id) {
     var list = [[id, patch]];
     if (patch.list) descendants(id).forEach(function (d) { list.push([d, { list: newList }]); });
     change(list);
-  } else { if ($('m_sort')) patch.sort = v('m_sort'); change([[id, patch]]); }
+  } else {
+    if ($('m_sort')) patch.sort = v('m_sort');
+    if ($('m_parent') && v('m_parent') !== (t.parent || '')) { patch.parent = v('m_parent'); patch.pos = String(Date.now()); }
+    change([[id, patch]]);
+  }
   closeMenu();
 }
 
@@ -1060,7 +1078,11 @@ document.addEventListener('click', function (e) {
     var id0 = menu.dataset.id, a = el.dataset.mact;
     if (a === 'save') menuSave(id0);
     if (a === 'close') closeMenu();
-    if (a === 'del') { change([[id0, null]]); closeMenu(); toast('Deleted (Ctrl+Z to undo)'); }
+    if (a === 'del') {
+      var dt0 = S.tasks[id0], inside = descendants(id0).filter(function (x) { return S.tasks[x] && isTask(S.tasks[x]); }).length;
+      if ((dt0.kind === 'category' || dt0.kind === 'header') && inside && !confirm('Delete "' + dt0.text + '" and the ' + inside + ' task(s) inside it? (Ctrl+Z undoes it.)')) return;
+      change([[id0, null]]); closeMenu(); toast('Deleted (Ctrl+Z to undo)');
+    }
     if (a === 'sub') { var p = S.tasks[id0], nid = newId(); change([[nid, { list: p.list, parent: p.id, kind: 'task', text: 'New subtask', day: p.day, state: 'open', pos: String(Date.now()), source: 'App' }]]); closeMenu(); setTimeout(function () { startEdit(nid); }, 30); }
     return;
   }
@@ -1111,6 +1133,7 @@ document.addEventListener('click', function (e) {
   else if (act === 'reload') { flush(); setTimeout(function () { load(false); }, 400); }
   else if (act === 'print') window.print();
   else if (act === 'up' || act === 'down') moveBlock(el.dataset.k, act === 'up' ? -1 : 1);
+  else if (act === 'grp') { var gp = json(store('grp'), {}) || {}; if (gp[el.dataset.k]) delete gp[el.dataset.k]; else gp[el.dataset.k] = 1; store('grp', JSON.stringify(gp)); render(); }
   else if (act === 'saveorder') saveOrder();
   else if (act === 'carryall') {
     var target = S.date === S.today ? addDays(S.today, 1) : S.today;
