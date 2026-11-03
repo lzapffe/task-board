@@ -21,6 +21,8 @@ html[data-mode="light"] {
 
 /* ---- Page frame: top bar, tray, left panel + main, quick add at the bottom ---- */
 * { box-sizing: border-box; }
+/* Anything marked hidden stays hidden, even if its class sets a display (fixes the tray, banner and bars not closing). */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font); }
 button, input, select, textarea { font: inherit; color: inherit; }
