@@ -35,7 +35,8 @@ var S = {
   archiveLoading: false,
   triage: null,         // morning review card: {ids, i}
   cardDay: '',          // day the morning card was last checked
-  suppressClick: 0      // time of a long-press, so the click after it is ignored
+  suppressClick: 0,     // time of a long-press, so the click after it is ignored
+  selMode: false, selPushed: false   // phone select mode (long-press a task) and whether it added a back-swipe step
 };
 // Default keyboard shortcuts (the Settings tab can change each one).
 var DEF_SC = { newTask: 'n', today: 't', prev: 'ArrowLeft', next: 'ArrowRight', week: 'w', lists: 'l', weekend: 'e', categories: 'c', search: '/', print: 'p',
@@ -887,14 +888,37 @@ function saveSetting(k, v) {
 function renderSel() {
   var ids = Object.keys(S.sel).filter(function (id) { return S.tasks[id]; });
   var bar = $('selbar');
-  bar.hidden = !ids.length;
-  if (!ids.length) return;
-  bar.innerHTML = '<b>' + ids.length + ' selected</b>' +
+  document.body.classList.toggle('selmode', !!S.selMode);
+  bar.hidden = !ids.length && !S.selMode;
+  if (bar.hidden) return;
+  bar.innerHTML = '<b>' + ids.length + ' selected</b>' + (S.selMode ? '<button class="btn" data-act="selall">Select all</button>' : '') +
     '<button class="btn" data-act="bulk" data-to="today">Today</button><button class="btn" data-act="bulk" data-to="tomorrow">Tomorrow</button>' +
     '<button class="btn" data-act="bulk" data-to="mon">Next Monday</button><button class="btn" data-act="bulk" data-to="week">+1 week</button>' +
     '<button class="btn" data-act="bulk" data-to="sat">Saturday</button><button class="btn" data-act="bulk" data-to="">No date</button>' +
     '<input type="date" id="bulkdate" aria-label="Move to date"><button class="btn" data-act="bulk" data-to="must">Must do</button>' +
-    '<button class="btn" data-act="bulk" data-to="done">Done</button><button class="btn warn" data-act="bulk" data-to="delete">Delete</button><button class="linkbtn" data-act="clearsel">Clear</button>';
+    '<button class="btn" data-act="bulk" data-to="done">Done</button><button class="btn warn" data-act="bulk" data-to="delete">Delete</button><button class="linkbtn" data-act="clearsel">' + (S.selMode ? 'Cancel' : 'Clear') + '</button>';
+}
+// Select mode (phone): opened by a long-press on a task. Ends after a move, on Cancel, Esc or the phone's back swipe.
+function startSelMode(id) {
+  S.selMode = true; S.sel = {}; S.sel[id] = true;
+  try { history.pushState({ tbSel: 1 }, ''); S.selPushed = true; } catch (err) { S.selPushed = false; }
+  render();
+}
+function endSelMode(fromBack) {
+  var was = S.selMode;
+  S.selMode = false; S.sel = {};
+  if (was && S.selPushed && !fromBack) { S.selPushed = false; try { history.back(); } catch (err) {} }
+  S.selPushed = false;
+  render();
+}
+window.addEventListener('popstate', function () { if (S.selMode) { S.selPushed = false; endSelMode(true); } });
+// Select all: every open task shown in the current view (not the done list or break ideas).
+function selectAllShown() {
+  Array.prototype.forEach.call(document.querySelectorAll('.main .task[data-id]'), function (r) {
+    if (r.closest('.donelist') || r.closest('.break') || r.dataset.s === 'done') return;
+    S.sel[r.dataset.id] = true;
+  });
+  render();
 }
 function bulkTarget(to) {
   if (to === 'today') return S.today;
@@ -1046,6 +1070,9 @@ document.addEventListener('click', function (e) {
   if (!e.target.closest('#results') && e.target.id !== 'search') { var r = $('results'); if (r) r.remove(); }
   var hp = document.querySelector('details.help[open]'); if (hp && !e.target.closest('details.help')) hp.open = false;
   if (e.target.closest('a.lnk')) return;   // links open normally
+  // Select mode: tapping a task (circle or text) selects or unselects it; nothing else happens on the row
+  var selRow = S.selMode && e.target.closest('.main .task[data-id]');
+  if (selRow) { e.preventDefault(); if (Date.now() - S.suppressClick < 700) return; toggleSel(selRow.dataset.id); return; }
   if (!el) return;
 
   // Morning review card
@@ -1163,9 +1190,10 @@ document.addEventListener('click', function (e) {
     else if (to2 === 'must') change(sel.map(function (x) { return [x, { must: 'yes' }]; }));
     else if (to2 === 'week') change(sel.map(function (x) { return [x, { day: addDays(S.tasks[x].day || S.today, 7), carried: '' }]; }));
     else moveTo(sel, bulkTarget(to2));
-    S.sel = {}; render();
+    if (S.selMode) endSelMode(); else { S.sel = {}; render(); }
   }
-  else if (act === 'clearsel') { S.sel = {}; render(); }
+  else if (act === 'clearsel') { if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
+  else if (act === 'selall') selectAllShown();
   else if (act === 'sugg') { var q = $('qa'); q.value = q.value.replace(/#[^\s#]*$/, '#' + el.dataset.v.replace(/\s+/g, '-') + ' '); q.focus(); renderSugg(''); }
   else if (act === 'hit') {
     var t = S.tasks[id]; var rr = $('results'); if (rr) rr.remove();
@@ -1176,7 +1204,7 @@ document.addEventListener('click', function (e) {
 });
 document.addEventListener('change', function (e) {
   var el = e.target;
-  if (el.id === 'bulkdate' && el.value) { moveTo(Object.keys(S.sel), el.value); S.sel = {}; render(); }
+  if (el.id === 'bulkdate' && el.value) { moveTo(Object.keys(S.sel), el.value); if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
   if (el.id === 'dp_in' && el.value) { var mm = $('menu'); if (mm) applyDate(mm.dataset.id, mm.dataset.f, el.value); }
   if (el.dataset.tgdate && el.value) triageAct('date', el.value, el.dataset.tgdate);
   if (el.dataset.tgsel && S.triage) { if (el.checked) S.triage.sel[el.dataset.tgsel] = true; else delete S.triage.sel[el.dataset.tgsel]; renderTriage(); }
@@ -1287,7 +1315,7 @@ document.addEventListener('keydown', function (e) {
     S.waitKey = null; render(); return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField) { e.preventDefault(); undo(); return; }
-  if (e.key === 'Escape') { if (S.triage) { triageAct('close'); return; } closeMenu(); S.sel = {}; S.focus = null; var r = $('results'); if (r) r.remove(); if (inField) e.target.blur(); render(); return; }
+  if (e.key === 'Escape') { if (S.triage) { triageAct('close'); return; } if (S.selMode) { endSelMode(); return; } closeMenu(); S.sel = {}; S.focus = null; var r = $('results'); if (r) r.remove(); if (inField) e.target.blur(); render(); return; }
   if (S.triage) return;   // the morning card uses its own buttons
 
   // Quick add: Enter adds; the search box searches
@@ -1338,14 +1366,22 @@ function moveFocus(dir) {
   return true;
 }
 
-// ---- Phone: swipe right = done, swipe left = tomorrow, long-press the circle = started ------
-var sw = null;
+// ---- Phone: swipe right = done, swipe left = tomorrow, long-press the circle = started, long-press the task = select mode ------
+var sw = null, lastTouch = 0;
+// Stop the phone's own long-press actions (text menu, drag) on task rows, so the long-press can open select mode
+document.addEventListener('contextmenu', function (e) { if (Date.now() - lastTouch < 1500 && e.target.closest('.task[data-id]')) e.preventDefault(); });
+document.addEventListener('dragstart', function (e) { if (Date.now() - lastTouch < 1500) { e.preventDefault(); e.stopPropagation(); } }, true);
 document.addEventListener('touchstart', function (e) {
   var row = e.target.closest('.task[data-id]'); if (!row || e.touches.length !== 1) { sw = null; return; }
   var p = e.touches[0];
   sw = { row: row, id: row.dataset.id, x: p.clientX, y: p.clientY, dx: 0, active: false, timer: null };
-  if (e.target.closest('.box')) sw.timer = setTimeout(function () {
+  lastTouch = Date.now();
+  if (e.target.closest('.box') && !S.selMode) sw.timer = setTimeout(function () {
     if (sw && !sw.active) { S.suppressClick = Date.now(); cycle(sw.id, 'start'); if (navigator.vibrate) navigator.vibrate(15); sw = null; }
+  }, 500);
+  // Long-press anywhere else on the task (not a button, link, chip or text being edited) opens select mode
+  else if (!S.selMode && !e.target.closest('button, a, .chip, .tag, [contenteditable="true"]') && row.closest('.main')) sw.timer = setTimeout(function () {
+    if (sw && !sw.active) { S.suppressClick = Date.now(); if (navigator.vibrate) navigator.vibrate(15); startSelMode(sw.id); sw = null; }
   }, 500);
 }, { passive: true });
 document.addEventListener('touchmove', function (e) {

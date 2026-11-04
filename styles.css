@@ -75,11 +75,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ---- Main area ---- */
 .main { grid-area: main; padding: 16px 22px 40px; display: grid; gap: 18px; align-content: start; min-width: 0; }
-.blocks { display: grid; gap: 18px; }
+.blocks { display: grid; gap: 30px; }
 .block { display: grid; gap: 2px; min-width: 0; position: relative; }
 .block.over { outline: 1px dashed var(--accent); outline-offset: 4px; border-radius: 6px; }
-.bh { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 5px; }
-.bh .ctl { margin-left: auto; display: flex; gap: 4px; letter-spacing: 0; text-transform: none; }
+.bh { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.12rem; letter-spacing: -0.005em; text-transform: none; color: var(--ink); border-bottom: 1px solid var(--line); padding: 2px 0 7px; }
+.bh .ctl { margin-left: auto; display: flex; gap: 4px; letter-spacing: 0; text-transform: none; font-size: 0.78rem; }
 .bh .ctl button { background: none; border: 1px solid transparent; color: var(--faint); border-radius: 5px; cursor: pointer; padding: 0 6px; font-weight: 700; }
 .bh .ctl button:hover { border-color: var(--line); color: var(--ink); }
 .fixed { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -305,9 +305,9 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 .triagebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 0.9rem; color: var(--muted); }
 .triagebar b { color: var(--ink); }
 .ring { width: 16px; height: 16px; flex: none; }
-.ringtxt { font-size: 0.72rem; color: var(--faint); letter-spacing: 0; text-transform: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ringtxt { font-size: 0.78rem; color: var(--faint); letter-spacing: 0; text-transform: none; font-weight: 700; font-variant-numeric: tabular-nums; }
 .alldone { color: var(--done); letter-spacing: 0; text-transform: none; font-weight: 700; font-size: 0.8rem; }
-.block[style*="--cc"] > .bh { border-left: 3px solid var(--cc); padding-left: 8px; }
+.block[style*="--cc"] > .bh { border-left: 4px solid var(--cc); padding-left: 10px; }
 .fold { background: none; border: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; padding: 0; display: flex; gap: 8px; align-items: center; text-align: left; }
 .fold .car { display: inline-block; color: var(--faint); transition: transform .15s; font-size: 0.8em; }
 .donelist .bh { color: var(--done); }
@@ -315,9 +315,9 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 /* ---- Lists view: clear heading levels, folding, plan mode ---- */
 .listbar { display: flex; gap: 8px; flex-wrap: wrap; }
 .cat.d0 { margin-top: 28px; }
-.cat.d0 > .bh { position: sticky; top: var(--toph, 58px); z-index: 5; background: var(--bg); padding: 8px 0 6px 10px; font-size: 1.08rem; text-transform: none; letter-spacing: -0.005em; color: var(--ink); border-left: 4px solid var(--cc, var(--line)); }
+.cat.d0 > .bh { position: sticky; top: var(--toph, 58px); z-index: 5; background: var(--bg); padding: 8px 0 7px 10px; font-size: 1.15rem; text-transform: none; letter-spacing: -0.005em; color: var(--ink); border-left: 4px solid var(--cc, var(--line)); }
 .cat.d1 { margin-top: 16px; }
-.cat.d1 > .bh { font-size: 0.95rem; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 700; margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--cc, var(--line)); border-bottom-style: dashed; }
+.cat.d1 > .bh { font-size: 1rem; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 700; margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--cc, var(--line)); border-bottom-style: dashed; }
 .cat.d2 > .bh, .cat.d3 > .bh { font-size: 0.88rem; text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 700; margin-left: 28px; border-bottom: 0; }
 .cnt2 { font-weight: 600; color: var(--faint); font-size: 0.78rem; letter-spacing: 0; text-transform: none; }
 .cat.folded > .bh .car { transform: rotate(-90deg); }
@@ -381,6 +381,16 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 .pop code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 0.8rem; }
 .pop p { margin: 6px 0 0; color: var(--muted); }
 
+/* ---- Select mode (phone: long-press a task): square checkboxes, tap to select ---- */
+body.selmode .box { border-radius: 5px; }
+body.selmode .task[data-s] .box { background: transparent; border-color: var(--faint); }
+body.selmode .task[data-s] .box::after { content: none; }
+body.selmode .task.sel[data-s] .box { background: var(--accent); border-color: var(--accent); }
+body.selmode .task.sel[data-s] .box::after { content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 11px; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+body.selmode .task .qa, body.selmode .task .more { display: none; }
+body.selmode .task .t { cursor: pointer; }
+@media (max-width: 820px) { .task .t:not([contenteditable="true"]) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } }
+
 /* ---- Phone: tabs at the bottom, bigger rows, swipe ---- */
 .task { touch-action: pan-y; }
 .task.sw-right { background: color-mix(in srgb, var(--done) 25%, transparent); }
@@ -438,7 +448,7 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
   .card.rv { overflow: auto; }
 }
 
-.subhdr { list-style: none; font-size: 0.78rem; font-weight: 800; color: var(--muted); padding: 8px 6px 2px; border-bottom: 1px dashed var(--line); }
+.subhdr { list-style: none; font-size: 0.9rem; font-weight: 700; color: var(--ink); padding: 12px 6px 4px; }
 
 /* ---- Print: leave out the new on-screen helpers ---- */
 @media print {
