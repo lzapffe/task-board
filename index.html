@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css?v=rev2f">
-<link rel="stylesheet" href="connect.css?v=rev2f">
+<link rel="stylesheet" href="styles.css?v=rev2g">
+<link rel="stylesheet" href="connect.css?v=rev2g">
 </head>
 <body>
 <div class="app" id="app">
@@ -31,7 +31,7 @@
     <div class="addrow">
       <label for="qa">+</label>
       <input id="qa" autocomplete="off" placeholder="Add a task. Enter puts it on the day you're looking at. Words: tomorrow, fri, 09:15, ! (must), due 15/11, #tag or #category">
-      <span class="kbd" id="kbdhint"></span>
+      <span class="qacat" id="qacat" title="Where a task without a #category goes: the last category you used"></span>
       <details class="help"><summary class="q" aria-label="How to write a quick task" title="How to write a quick task">?</summary>
         <span class="pop"><b>Quick add: type a task, then press Enter</b>
           <table>
@@ -43,9 +43,11 @@
             <tr><td><code>due 15/11</code></td><td>deadline</td></tr>
             <tr><td><code>#Category</code></td><td>put it in a category (suggestions appear)</td></tr>
             <tr><td><code>#tag</code></td><td>a tag (any word that isn't a category)</td></tr>
+            <tr><td><code>~</code></td><td>if time (grey, last in its block)</td></tr>
           </table>
           Example: <code>Email supervisor tomorrow 10:00 ! #Research</code>
-          <p>Without a day word, the task goes on the day you're looking at. In the Lists view it gets no day.</p>
+          <p>Without a day word, the task goes on the day you're looking at. In the Lists view it gets no day. Without a #category it goes to the last category you used (shown next to the box).</p>
+          <div class="keys" id="kbdhelp"></div>
         </span></details>
     </div>
   </div>
@@ -67,7 +69,7 @@
   </form>
 </div>
 
-<script src="connect.js?v=rev2f"></script>
-<script src="app.js?v=rev2f"></script>
+<script src="connect.js?v=rev2g"></script>
+<script src="app.js?v=rev2g"></script>
 </body>
 </html>

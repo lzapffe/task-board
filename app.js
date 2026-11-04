@@ -28,7 +28,8 @@ var S = {
   flash: null,          // task that was just ticked (gentle done effect)
   linger: {},           // just-done tasks that stay in place for a moment
   openDet: {},          // tasks with their details opened
-  doneOpen: false,      // "Done today" list opened
+  doneOpen: true,       // "Done today" list opened (open by default)
+  anchor: null,         // last task clicked for selection, so Shift+click can select a range
   plan: false,          // plan mode in the Lists view
   planMon: '',          // Monday of the week shown in plan mode
   archive: null,        // Done archive rows (loaded when needed)
@@ -44,6 +45,7 @@ var DEF_SC = { newTask: 'n', today: 't', prev: 'ArrowLeft', next: 'ArrowRight', 
 function shortcuts() { return Object.assign({}, DEF_SC, json(S.settings.shortcuts, {})); }
 // Small line icons for the hover buttons.
 var ICON = {
+  gear: '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
   next: '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   cal: '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 };
@@ -68,6 +70,16 @@ function newId() { return 't' + Date.now().toString(36).slice(-6) + Math.floor(M
 function json(s, fb) { try { return JSON.parse(s); } catch (e) { return fb; } }
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 function tagsOf(t) { return String(t.tags || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
+// Tags kept in the data (for Claude) but not shown in the app: work/personal type, and "if time" (shown as grey text instead).
+var HIDDEN_TAGS = ['work', 'personal', 'if time'];
+function shownTags(t) { return tagsOf(t).filter(function (x) { return HIDDEN_TAGS.indexOf(x.toLowerCase()) === -1; }); }
+function isIfTime(t) { return hasTag(t, 'if time'); }
+// Guidance texts (small "how to" lines) are off unless switched on in Settings.
+function guide() { return S.settings.guidance === 'on'; }
+// The category a task sits in (its nearest category or label, above any parent tasks).
+function nearestCat(t) { var p = t && S.tasks[t.parent], g = 0; while (p && p.kind === 'task' && g++ < 10) p = S.tasks[p.parent]; return p && p.kind !== 'task' ? p.id : ''; }
+// Remembers the last category you used (added, ticked, started or moved a task in); quick add uses it when you give no #category.
+function noteCat(id) { var c = nearestCat(S.tasks[id]); if (c) store('lastcat', c); }
 function hasTag(t, tag) { return tagsOf(t).some(function (x) { return x.toLowerCase() === tag; }); }
 function all() { return Object.keys(S.tasks).map(function (k) { return S.tasks[k]; }); }
 function isTask(t) { return t.kind === 'task'; }
@@ -172,7 +184,7 @@ function load(fresh) {
     // The morning review card opens by itself the first time the board is opened each day.
     if (S.cardDay !== S.today) {
       S.cardDay = S.today;
-      if (S.view === 'day' && store('card:' + S.today) !== '1' && triageItems().length) openTriage();
+      if (S.view === 'day' && store('card:' + S.today) !== '1') openTriage();
     }
   }).withFailureHandler(function (e) { setSave('Couldn\'t load: ' + e.message, true); })[fn]();
 }
@@ -250,7 +262,7 @@ function blank() {
 }
 function toast(msg) { setSave(msg); }
 
-// Ticking: one click = done (or back to open). mode 'start' = started on/off (◐, Shift+click, long-press).
+// Ticking: one click = done (or back to open). mode 'start' = started on/off (◐, Alt+click, long-press).
 // Finishing all subtasks ticks the parent (confetti).
 function cycle(id, mode) {
   var t = S.tasks[id]; if (!t) return;
@@ -268,6 +280,7 @@ function cycle(id, mode) {
       if (!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)))) render();
     }, 1300);
   }
+  noteCat(id);
   var list = [[id, patch]], burstEl = null;
   if ((patch.state === 'done') && t.parent && S.tasks[t.parent] && S.tasks[t.parent].kind === 'task') {
     var p = S.tasks[t.parent];
@@ -289,6 +302,7 @@ function plusOne(id) {
   change([[id, { count: n, state: n >= Number(t.count_of) ? 'done' : 'started' }]]);
 }
 function moveTo(ids, day, extra) {
+  if (ids.length) noteCat(ids[0]);
   change(ids.map(function (id) { return [id, Object.assign({ day: day, carried: '' }, extra || {})]; }));
 }
 function nextWeekday(target, from) { var d = from || S.today; var n = (target - dow(d) + 7) % 7; return addDays(d, n === 0 ? 7 : n); }
@@ -327,7 +341,7 @@ function renderTop() {
   var arrows = ['day', 'week', 'weekend'].indexOf(S.view) !== -1;
   var todays = all().filter(function (t) { return isTask(t) && t.day === S.date; });
   var done = todays.filter(function (t) { return t.state === 'done'; }).length;
-  var views = [['day', 'Today'], ['week', 'Week'], ['lists', 'Lists'], ['weekend', 'Weekend'], ['categories', 'Categories'], ['stats', 'Stats'], ['settings', '⚙']];
+  var views = [['day', 'Today'], ['week', 'Week'], ['lists', 'Lists'], ['weekend', 'Weekend'], ['categories', 'Categories'], ['stats', 'Stats'], ['settings', ICON.gear]];
   var wkStart = mondayOf(S.today);
   var wkDone = all().filter(function (t) { return isTask(t) && t.state === 'done' && String(t.done_at).slice(0, 10) >= wkStart; }).length;
   $('top').innerHTML =
@@ -376,7 +390,7 @@ function renderSide() {
         '<em>' + (d <= S.today ? dn + '/' + ts.length : ts.length) + '</em>' + (ts.length && d <= S.today ? '<span class="mbar"><i style="width:' + dn / ts.length * 100 + '%"></i></span>' : '') + '</li>';
     }).join('') +
       '<li data-act="weekend" data-drop="weekend" data-day="' + addDays(mon, 5) + '" class="' + (S.view === 'weekend' ? 'on' : '') + '">Weekend ' + pd(addDays(mon, 5)).getUTCDate() + '–' + pd(addDays(mon, 6)).getUTCDate() + '<em>' + all().filter(function (t) { return isTask(t) && (t.day === addDays(mon, 5) || t.day === addDays(mon, 6)); }).length + '</em></li>' +
-      '<li data-drop="day" data-day="" title="Drop a task here to take it off the schedule">No date<em>drop</em></li></ul></div>';
+      '<li data-drop="day" data-day="" title="Drop a task here to take it off the schedule">No date<em></em></li></ul></div>';
     html += '<div><h4>Lists</h4><ul>' + Object.keys(LISTS).map(function (l) { return '<li data-act="list" data-l="' + l + '">' + LISTS[l] + '<em>' + all().filter(function (t) { return t.list === l && isTask(t) && t.state !== 'done'; }).length + '</em></li>'; }).join('') + '</ul></div>';
   }
   $('side').innerHTML = html;
@@ -404,9 +418,9 @@ function tagColor(tag) {
 function taskRow(t, level, opts) {
   opts = opts || {};
   var cnt = Number(t.count_of) > 0;
-  var tags = tagsOf(t).filter(function (x) { return !(opts.hideBreak && x.toLowerCase() === 'break'); });
+  var tags = shownTags(t).filter(function (x) { return !(opts.hideBreak && x.toLowerCase() === 'break'); });
   var bits = '';
-  if (t.must) bits += '<span class="tag g6">must do</span>';
+  if (t.must && t.state !== 'done') bits += '<span class="tag g6">must do</span>';
   tags.forEach(function (x) { bits += '<span class="tag g' + tagColor(x) + '">' + esc(x) + '</span>'; });
   if (t.deadline) bits += '<span class="tag dl chip ' + (t.deadline < S.today && t.state !== 'done' ? 'late' : 'g2') + '" data-act="datechip" data-f="deadline" data-id="' + t.id + '" title="Change the deadline">due ' + esc(shortDate(t.deadline)) + '</span>';
   if (opts.showDay && t.day) bits += '<span class="meta chip" data-act="datechip" data-f="day" data-id="' + t.id + '" title="Change the day">' + esc(shortDate(t.day)) + (t.span === 'weekend' ? ' (weekend)' : '') + '</span>';
@@ -417,13 +431,13 @@ function taskRow(t, level, opts) {
   var lv = Math.min(level || 0, 3);
   var hasDet = String(t.details || '').trim() !== '', detOpen = hasDet && S.openDet[t.id];
   var qa = '<span class="qa">' +
-    '<button data-act="start" data-id="' + t.id + '" title="' + (t.state === 'started' ? 'Not started' : 'Mark as started') + ' (or Shift+click the circle)" aria-label="Mark as started">◐</button>' +
+    '<button data-act="start" data-id="' + t.id + '" title="' + (t.state === 'started' ? 'Not started' : 'Mark as started') + ' (or Alt+click the circle)" aria-label="Mark as started">◐</button>' +
     '<button data-act="tmrw" data-id="' + t.id + '" title="Move to tomorrow" aria-label="Move to tomorrow">' + ICON.next + '</button>' +
     '<button data-act="datechip" data-f="day" data-id="' + t.id + '" title="Pick a day" aria-label="Pick a day">' + ICON.cal + '</button>' +
     '<button data-act="musttog" data-id="' + t.id + '" title="Must do on/off" aria-label="Must do on or off">!</button></span>';
-  return '<li class="task l' + lv + (t.must ? ' must' : '') + (S.sel[t.id] ? ' sel' : '') + (S.focus === t.id ? ' kfocus' : '') + (S.flash === t.id ? ' flash' : '') + '" data-id="' + t.id + '" data-s="' + esc(t.state || 'open') + '" draggable="true" data-drop="task">' +
+  return '<li class="task l' + lv + (t.must ? ' must' : '') + (isIfTime(t) ? ' iftime' : '') + (S.sel[t.id] ? ' sel' : '') + (S.focus === t.id ? ' kfocus' : '') + (S.flash === t.id ? ' flash' : '') + '" data-id="' + t.id + '" data-s="' + esc(t.state || 'open') + '" draggable="true" data-drop="task">' +
     (cnt ? '<span class="counter" style="width:' + Math.min(100, (Number(t.count) || 0) / Number(t.count_of) * 100) + '%"></span>' : '') +
-    '<button class="box" data-act="tick" data-id="' + t.id + '" aria-label="Tick off" title="Tick off (Shift+click: started)"></button>' +
+    '<button class="box" data-act="tick" data-id="' + t.id + '" aria-label="Tick off" title="Tick off (Alt+click: started)"></button>' +
     '<div class="tx"><span class="t" data-act="edit" data-id="' + t.id + '">' + linkify(t.text) + '</span>' +
     (hasDet ? '<button class="det-btn' + (detOpen ? ' on' : '') + '" data-act="det" data-id="' + t.id + '" aria-expanded="' + (detOpen ? 'true' : 'false') + '">' + (detOpen ? '▾' : '▸') + ' details</button>' : '') + bits + '</div>' +
     qa + '<button class="more" data-act="menu" data-id="' + t.id + '" aria-label="More">⋯</button></li>' +
@@ -445,12 +459,13 @@ function dayView(date) {
   }
 
   // Must-do strip: all of the day's must-do tasks in one row
-  var musts = tasks.filter(function (t) { return isTask(t) && t.must; });
+  var musts = tasks.filter(function (t) { return isTask(t) && t.must && t.state !== 'done'; });
   if (musts.length) html += '<div class="muststrip"><span class="lbl">Must do' + (date === S.today ? ' today' : '') + '</span>' +
     musts.map(function (t) { return '<button class="mchip' + (t.state === 'done' ? ' done' : '') + '" data-act="hit" data-id="' + t.id + '">' + esc(t.text) + '</button>'; }).join('') + '</div>';
 
   // Fixed times
-  html += '<div class="block"><div class="bh">Fixed times</div><div class="fixed">' +
+  // (hidden when empty, unless guidance texts are on)
+  if (events.length || guide()) html += '<div class="block"><div class="bh">Fixed times</div><div class="fixed">' +
     (events.length ? events.map(function (e) { return '<div class="ev"><b>' + timeText(e.time) + '</b>' + linkify(e.text) + '<button data-act="menu" data-id="' + e.id + '" aria-label="Edit">⋯</button></div>'; }).join('') : '<span class="empty">Nothing fixed. Add one with a time, like "Meeting 13:00".</span>') + '</div></div>';
 
   // Group the day's tasks: carried over, not sorted yet, then one block per top category.
@@ -482,10 +497,15 @@ function dayView(date) {
     var ctl = isCatBlock ? '<span class="ctl"><button data-act="grp" data-k="' + k + '" title="Show subheadings for subcategories in this block">' + (grouped ? 'Ungroup' : 'Group by subcategory') + '</button><button data-act="up" data-k="' + k + '" aria-label="Move block up">↑</button><button data-act="down" data-k="' + k + '" aria-label="Move block down">↓</button></span>' :
       (k === 'carried' ? '<span class="ctl"><button data-act="carryall">Move all to ' + (date === S.today ? 'tomorrow' : 'today') + '</button></span>' : '');
     html += '<div class="block" data-key="' + k + '" data-drop="block" data-cat="' + (isCatBlock ? k : '') + '"' + (isCatBlock ? ccStyle(catColor(S.tasks[k])) : '') + '><div class="bh">' +
-      (isCatBlock ? ring(doneN, total) : '') + '<span>' + esc(g.title) + '</span>' + (isCatBlock && !g.list.length ? '<span class="alldone">All done ✓</span>' : '') + ctl + '</div><ul class="tasks">';
+      '<span>' + esc(g.title) + '</span>' + (isCatBlock ? ring(doneN, total) : '') + (isCatBlock && !g.list.length ? '<span class="alldone">All done ✓</span>' : '') + ctl + '</div><ul class="tasks">';
     // With "Group by subcategory" on: tasks sorted under a subheading per subcategory (path below the top category).
     var rows = g.list, lastSub = null;
     if (grouped) rows = g.list.slice().sort(function (a, b) { var x = subPath(a), y = subPath(b); return x === y ? 0 : (x === '' ? -1 : y === '' ? 1 : (x < y ? -1 : 1)); });
+    // "If time" tasks go last (within each subheading when grouped)
+    rows = rows.map(function (t, i) { return [t, i]; }).sort(function (a, b) {
+      if (grouped) { var x = subPath(a[0]), y = subPath(b[0]); if (x !== y) return a[1] - b[1]; }
+      return (isIfTime(a[0]) ? 1 : 0) - (isIfTime(b[0]) ? 1 : 0) || a[1] - b[1];
+    }).map(function (p) { return p[0]; });
     rows.forEach(function (t) {
       if (grouped) { var sp = subPath(t); if (sp !== lastSub) { lastSub = sp; if (sp) html += '<li class="subhdr">' + esc(sp) + '</li>'; } }
       html += taskRow(t, 0, { showPath: !isCatBlock, hideBreak: true });
@@ -501,7 +521,6 @@ function dayView(date) {
     html += '</ul></div>';
   });
   html += '</div>';
-  if (catKeys.length > 1) html += '<div><button class="linkbtn" data-act="saveorder">Save this block order as standard</button></div>';
 
   // Done today (folded by default; click to open)
   if (doneList.length) {
@@ -553,8 +572,8 @@ function markReviewed(ids) {
 function openTriage() {
   store('card:' + S.today, '1');
   S.triage = { skipped: {}, sel: {} };
-  if (!reviewItems().length) { S.triage = null; toast('Nothing to review'); return; }
   render(); renderTriage();
+  setTimeout(function () { var mt = $('rv_mt_text'); if (mt && !reviewItems().length) mt.focus(); }, 30);
 }
 // The days shown on the left: today to Friday, Saturday, Sunday (on a weekend: today and Sunday).
 function reviewDays() {
@@ -600,7 +619,9 @@ function renderTriage() {
   var d = document.createElement('div'); d.className = 'overlay'; d.id = 'triage';
   d.innerHTML = '<div class="card rv" role="dialog" aria-modal="true" aria-label="Morning review">' +
     '<div class="cardhead"><b>Morning review</b><span class="meta">' + items.length + ' to review · drag a task onto a day, or use its buttons</span><button class="btn pri" data-tg="close">' + (items.length ? 'Finish later' : 'Close') + '</button></div>' +
-    '<div class="rv-grid"><div class="rv-days">' + left + '</div><div class="rv-side">' +
+    '<div class="rv-grid"><div class="rv-days">' +
+    '<div class="rv-meet"><h4>Meetings today</h4><div class="row"><input type="time" id="rv_mt_time" aria-label="Starts"><input type="time" id="rv_mt_end" aria-label="Ends (optional)"><input type="text" id="rv_mt_text" placeholder="Meeting"><button class="btn pri" data-tg="meet">Add</button></div></div>' +
+    left + '</div><div class="rv-side">' +
     (nSel ? '<div class="rv-bulk"><b>' + nSel + ' selected:</b><button class="btn" data-tgbulk="today">Today</button><button class="btn" data-tgbulk="tomorrow">Tomorrow</button><button class="btn" data-tgbulk="mon">Next Mon</button><button class="btn" data-tgbulk="nodate">No date</button><button class="btn" data-tgbulk="done">Done</button><button class="btn warn" data-tgbulk="delete">Delete</button><button class="linkbtn" data-tgbulk="clear">Clear</button></div>' :
       (items.length > 1 ? '<div class="rv-bulk meta"><button class="linkbtn" data-tgbulk="all">Select all</button></div>' : '')) +
     '<div class="rv-list">' + right + '</div></div></div></div>';
@@ -611,6 +632,15 @@ function renderTriage() {
 function triageAct(a, val, id, ids) {
   var tr = S.triage; if (!tr) return;
   if (a === 'close') { S.triage = null; renderTriage(); render(); return; }
+  if (a === 'meet') {
+    // Adds a meeting to today's Fixed times
+    var mt = $('rv_mt_time').value, me = $('rv_mt_end').value, mx = $('rv_mt_text').value.trim();
+    if (!mt || !mx) { toast('Add a start time and a name'); return; }
+    change([[newId(), { list: 'main', parent: '', kind: 'event', pos: String(Date.now()), text: mx, day: S.today, time: mt + (me ? '-' + me : ''), state: 'open', source: 'App' }]]);
+    toast('Added to Fixed times'); renderTriage();
+    setTimeout(function () { var f = $('rv_mt_text'); if (f) f.focus(); }, 30);
+    return;
+  }
   ids = ids || [id];
   if (a === 'skip') { ids.forEach(function (x) { tr.skipped[x] = true; }); renderTriage(); return; }
   var list = [];
@@ -647,7 +677,7 @@ function openDatePop(id, field, anchor) {
     '<div class="row"><button class="btn" data-dp="today">Today</button><button class="btn" data-dp="tomorrow">Tomorrow</button><button class="btn" data-dp="mon">Next Mon</button><button class="btn" data-dp="sat">Saturday</button><button class="btn" data-dp="">' + (field === 'deadline' ? 'No deadline' : 'No date') + '</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
-  m.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  m.style.top = fitTop(m, r) + 'px';
   m.style.left = Math.max(8, Math.min(window.scrollX + r.left - 100, document.documentElement.clientWidth - 270)) + 'px';
   m.dataset.id = id; m.dataset.f = field;
   var inp = $('dp_in'); inp.focus();
@@ -669,7 +699,7 @@ function openArchived(id, anchor) {
     '<div class="row"><button class="btn pri" data-act="readd" data-id="' + esc(t.id) + '">Add again for today</button><button class="linkbtn" data-mact="close">Close</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
-  m.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  m.style.top = fitTop(m, r) + 'px';
   m.style.left = Math.max(8, Math.min(window.scrollX + r.left, document.documentElement.clientWidth - 310)) + 'px';
 }
 function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) % 100003; return h; }
@@ -853,7 +883,7 @@ var LOOK_DEFAULT = { accent: 'orange', must_color: 'orange', density: 'normal', 
 function settingsView() {
   var sc = shortcuts(), colors = json(S.settings.tag_colors, {});
   var tags = {};
-  all().forEach(function (t) { tagsOf(t).forEach(function (x) { tags[x.toLowerCase()] = true; }); });
+  all().forEach(function (t) { shownTags(t).forEach(function (x) { tags[x.toLowerCase()] = true; }); });
   Object.keys(colors).forEach(function (k) { tags[k] = true; });
   return '<div class="settings">' +
     '<section><h3>Look</h3><div class="srow"><label>Mode</label><button class="btn" data-act="mode">' + (S.settings.theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode') + '</button></div>' +
@@ -865,7 +895,12 @@ function settingsView() {
     }).join('') + '</section>' +
     '<section><h3>Day view</h3><div class="srow"><label for="s_break">Break tasks shown</label><input type="number" id="s_break" min="0" max="10" value="' + esc(S.settings.break_count || 3) + '" data-setting="break_count"></div>' +
     '<div class="srow"><label for="s_pills">Status pill names</label><input type="text" id="s_pills" style="flex:1" value="' + esc(S.settings.pills || '') + '" data-setting="pills"></div>' +
-    '<div class="srow"><label for="s_arr">Sources that go to the tray</label><input type="text" id="s_arr" style="flex:1" value="' + esc(S.settings.arrival_sources || '') + '" data-setting="arrival_sources"></div></section>' +
+    '<div class="srow"><label for="s_arr">Sources that go to the tray</label><input type="text" id="s_arr" style="flex:1" value="' + esc(S.settings.arrival_sources || '') + '" data-setting="arrival_sources"></div>' +
+    '<div class="srow"><label>Guidance texts</label><button class="btn" data-act="guidance">' + (guide() ? 'On · turn off' : 'Off · turn on') + '</button></div></section>' +
+    // Block order: the standard order of the category blocks in the day view
+    '<section><h3>Block order (day view)</h3>' + categories('main').filter(function (c) { return c.depth === 0; }).map(function (c, i, arr) {
+      return '<div class="bo-row"><span>' + esc(c.t.text) + '</span><button class="btn" data-act="bo" data-id="' + c.t.id + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Move up">↑</button><button class="btn" data-act="bo" data-id="' + c.t.id + '" data-dir="1"' + (i === arr.length - 1 ? ' disabled' : '') + ' aria-label="Move down">↓</button></div>';
+    }).join('') + '</section>' +
     '<section><h3>Tag colours</h3>' + Object.keys(tags).sort().map(function (k) {
       var c = colors[k] || tagColor(k);
       return '<div class="srow"><label><span class="tag g' + c + '">' + esc(k) + '</span></label><span class="swatches">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<button class="g' + n + (n === c ? ' on' : '') + '" data-act="tagcolor" data-tag="' + esc(k) + '" data-n="' + n + '" aria-label="Colour ' + n + '"></button>'; }).join('') + '</span></div>';
@@ -873,10 +908,9 @@ function settingsView() {
     '<section><h3>Keyboard shortcuts</h3>' + Object.keys(SHORTCUT_NAMES).map(function (k) {
       return '<div class="srow"><label>' + SHORTCUT_NAMES[k] + '</label><button class="keycap' + (S.waitKey === k ? ' wait' : '') + '" data-act="setkey" data-k="' + k + '">' + (S.waitKey === k ? 'Press a key…' : esc(sc[k] || '–')) + '</button></div>';
     }).join('') +
-    '<div class="srow"><label>Always</label><span class="meta">Ctrl+Z undo · Shift+click a circle: started · ↓/↑ also move between tasks once one is picked · Esc closes menus · Ctrl/Cmd-click selects several tasks</span></div></section>' +
+    (guide() ? '<div class="srow"><label>Always</label><span class="meta">Ctrl+Z undo · Alt+click a circle: started · ↓/↑ also move between tasks once one is picked · Esc closes menus · Ctrl/Cmd-click selects several tasks · Shift+click selects a range</span></div>' : '') + '</section>' +
     // Only in the GitHub Pages version: forget the key on this device.
-    (window.TB_REMOTE ? '<section><h3>This device</h3><div class="srow"><label>Connection</label><button class="btn" data-act="forget">Forget the key on this device</button></div>' +
-      '<div class="srow"><label></label><span class="meta">Use this on a shared or borrowed computer, or before giving a device away.</span></div></section>' : '') +
+    (window.TB_REMOTE ? '<section><h3>This device</h3><div class="srow"><label>Connection</label><button class="btn" data-act="forget">Forget the key on this device</button></div></section>' : '') +
     '</div>';
 }
 function saveSetting(k, v) {
@@ -930,7 +964,16 @@ function bulkTarget(to) {
 }
 function renderHint() {
   var sc = shortcuts();
-  $('kbdhint').textContent = (sc.newTask || 'n') + ' new · ' + (sc.prev === 'ArrowLeft' ? '←' : sc.prev) + ' ' + (sc.next === 'ArrowRight' ? '→' : sc.next) + ' days · Ctrl+Z undo';
+  var key = function (k) { return '<code>' + esc(k === 'ArrowLeft' ? '←' : k === 'ArrowRight' ? '→' : k || '–') + '</code>'; };
+  var box = $('kbdhelp'); if (!box) return;
+  box.innerHTML = '<b>Keys</b><table>' +
+    '<tr><td>' + key(sc.newTask) + '</td><td>jump to quick add (when you\'re not typing)</td></tr>' +
+    '<tr><td><code>Tab</code></td><td>pick the next #suggestion (Shift+Tab: back)</td></tr>' +
+    '<tr><td>' + key(sc.prev) + ' ' + key(sc.next) + '</td><td>previous / next day</td></tr>' +
+    '<tr><td><code>Ctrl+Z</code></td><td>undo the last change</td></tr>' +
+    '<tr><td><code>Esc</code></td><td>close menus, clear the selection</td></tr></table>' +
+    'All shortcuts can be changed in Settings.';
+  renderQaCat();
 }
 
 // ---- The ⋯ menu (move, edit, tags, deadline, counter, subtask, delete) --------------
@@ -951,20 +994,27 @@ function openMenu(id, anchor) {
       '<label>Colour</label><span class="swatches">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<button class="g' + n + (catColor(t) === n ? ' on' : '') + '" data-mcolor="' + n + '" aria-label="Colour ' + n + '"></button>'; }).join('') + '</span>' : '') +
     (isCat ? '' :
       '<div class="two"><label>Deadline<input type="date" id="m_dl" value="' + esc(t.deadline) + '"></label><label>Counter (out of)<input type="number" id="m_cnt" min="0" value="' + esc(t.count_of) + '"></label></div>' +
-      '<label>Tags (comma separated)<input id="m_tags" value="' + esc(t.tags) + '"></label>' +
+      '<label>Tags (comma separated)<input id="m_tags" value="' + esc(shownTags(t).join(', ')) + '"></label>' +
       '<label>Note (short, shown in Claude\'s files)<input id="m_note" value="' + esc(t.note) + '"></label>' +
       '<label>Details (only shown when you open them; not in Claude\'s files)<textarea id="m_det" rows="3" placeholder="Where to go, contact info, links…">' + esc(t.details) + '</textarea></label>' +
       '<div class="row"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_must" ' + (t.must ? 'checked' : '') + ' style="width:auto"> Must do</label>' +
+      '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_if" ' + (isIfTime(t) ? 'checked' : '') + ' style="width:auto"> If time</label>' +
       '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_wk" ' + (t.span === 'weekend' ? 'checked' : '') + ' style="width:auto"> Whole weekend</label></div>' +
       '<label>List<select id="m_list">' + Object.keys(LISTS).map(function (l) { return '<option value="' + l + '"' + (t.list === l ? ' selected' : '') + '>' + LISTS[l] + '</option>'; }).join('') + '</select></label>' +
       '<label>Category<select id="m_cat"><option value="">(none)</option>' + categories(t.list).map(function (c) { return '<option value="' + c.t.id + '"' + (topOrParent(t) === c.t.id ? ' selected' : '') + '>' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('') + '</select></label>') +
     '<div class="row"><button class="btn pri" data-mact="save">Save</button>' + (isCat ? '' : '<button class="btn" data-mact="sub">+ Subtask</button>') + '<button class="btn warn" data-mact="del">Delete</button><button class="linkbtn" data-mact="close">Close</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
-  m.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  m.style.top = fitTop(m, r) + 'px';
   m.style.left = Math.max(8, Math.min(window.scrollX + r.right - 300, document.documentElement.clientWidth - 310)) + 'px';
   m.dataset.id = id;
   var first = m.querySelector('textarea'); if (first) first.focus();
+}
+// Places a pop-up under its button, or higher up if it would run off the bottom of the window.
+function fitTop(m, r) {
+  var h = m.offsetHeight, vh = window.innerHeight, top = r.bottom + 4;
+  if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
+  return window.scrollY + top;
 }
 function topOrParent(t) { var p = S.tasks[t.parent]; return p && p.kind === 'category' ? p.id : (p && p.kind !== 'task' ? p.id : ''); }
 function closeMenu() { var m = $('menu'); if (m) m.remove(); }
@@ -975,7 +1025,10 @@ function menuSave(id) {
     patch.day = v('m_day'); patch.time = v('m_time') ? v('m_time') + (v('m_end') ? '-' + v('m_end') : '') : ''; patch.kind = v('m_time') ? 'event' : 'task';
     patch.deadline = v('m_dl'); patch.count_of = Number(v('m_cnt')) > 0 ? v('m_cnt') : '';
     if (patch.count_of && !t.count) patch.count = '0';
-    patch.tags = v('m_tags'); patch.note = v('m_note'); patch.details = v('m_det');
+    // Tags: what you typed, plus the hidden work/personal tag, plus "if time" when ticked
+    var keep = tagsOf(t).filter(function (x) { return ['work', 'personal'].indexOf(x.toLowerCase()) !== -1; });
+    patch.tags = v('m_tags').split(',').map(function (x) { return x.trim(); }).filter(Boolean).concat(keep).concat($('m_if').checked ? ['if time'] : []).join(', ');
+    patch.note = v('m_note'); patch.details = v('m_det');
     patch.must = $('m_must').checked ? 'yes' : ''; patch.span = $('m_wk').checked ? 'weekend' : '';
     if (patch.day !== t.day) patch.carried = '';
     var newList = v('m_list'), newCat = v('m_cat');
@@ -984,6 +1037,7 @@ function menuSave(id) {
     var list = [[id, patch]];
     if (patch.list) descendants(id).forEach(function (d) { list.push([d, { list: newList }]); });
     change(list);
+    noteCat(id);
   } else {
     if ($('m_sort')) patch.sort = v('m_sort');
     if ($('m_parent') && v('m_parent') !== (t.parent || '')) { patch.parent = v('m_parent'); patch.pos = String(Date.now()); }
@@ -1002,6 +1056,7 @@ function parseQuick(text) {
     var w = words[i], lw = w.toLowerCase();
     var wd = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(lw.slice(0, 3));
     if (w === '!') { o.must = 'yes'; continue; }
+    if (w === '~') { o.tags.push('if time'); continue; }
     if (/^\d{1,2}[:.]\d{2}(-\d{1,2}[:.]\d{2})?$/.test(w)) { o.time = w.replace(/\./g, ':'); continue; }
     if (lw === 'today') { o.day = S.today; continue; }
     if (lw === 'tomorrow') { o.day = addDays(S.today, 1); continue; }
@@ -1031,17 +1086,29 @@ function quickAdd(text, parentOverride) {
   var o = parseQuick(text);
   if (!o.text) return;
   var id = newId();
+  // No #category: use the last category you used (if it is in the same list)
+  if (!parentOverride && !o.parent) { var lc = lastCatFor(o.list); if (lc) o.parent = lc; }
   var row = { list: o.list, parent: parentOverride || o.parent, kind: o.time ? 'event' : 'task', pos: String(Date.now()), text: o.text, day: o.day, time: o.time, must: o.must, deadline: o.deadline, tags: o.tags.join(', '), state: 'open', source: 'App', span: o.span };
   if (parentOverride) { var p = S.tasks[parentOverride]; row.list = p.list; if (!/(today|tomorrow|mon|tue|wed|thu|fri|sat|sun)/i.test(text)) row.day = ''; }
   change([[id, row]]);
-  toast('Added' + (row.day ? ' to ' + shortDate(row.day) : ''));
+  noteCat(id);
+  toast('Added' + (row.day ? ' to ' + shortDate(row.day) : '') + (row.parent && S.tasks[row.parent] ? ' in ' + S.tasks[row.parent].text : ''));
+}
+function lastCatFor(list) { var lc = store('lastcat'); return lc && S.tasks[lc] && S.tasks[lc].list === list ? lc : ''; }
+// The small "→ Category" label next to quick add: where the task will go.
+function renderQaCat() {
+  var el = $('qacat'), q = $('qa'); if (!el || !q) return;
+  var o = parseQuick(q.value || ''), c = o.parent || lastCatFor(o.list);
+  el.textContent = c && S.tasks[c] ? '→ ' + S.tasks[c].text : '';
 }
 function renderSugg(val) {
   var m = val.match(/#([^\s#]*)$/), box = $('sugg');
+  S.suggPick = -1;
+  renderQaCat();
   if (!m) { box.innerHTML = ''; return; }
   var q = m[1].replace(/[-_]/g, ' ').toLowerCase(), seen = {}, out = [];
   categories('main').concat(categories('weekend')).concat(categories('ideas')).forEach(function (c) { var n = c.t.text; if (n.toLowerCase().indexOf(q) === 0 && !seen[n]) { seen[n] = 1; out.push(['cat', n]); } });
-  all().forEach(function (t) { tagsOf(t).forEach(function (x) { if (x.toLowerCase().indexOf(q) === 0 && !seen[x]) { seen[x] = 1; out.push(['tag', x]); } }); });
+  all().forEach(function (t) { shownTags(t).forEach(function (x) { if (x.toLowerCase().indexOf(q) === 0 && !seen[x]) { seen[x] = 1; out.push(['tag', x]); } }); });
   box.innerHTML = out.slice(0, 10).map(function (x) { return '<button class="tag ' + (x[0] === 'cat' ? 'g4' : 'g' + tagColor(x[1])) + '" data-act="sugg" data-v="' + esc(x[1]) + '">' + (x[0] === 'cat' ? '▸ ' : '') + esc(x[1]) + '</button>'; }).join('');
 }
 
@@ -1063,6 +1130,7 @@ function showResults(q) {
 }
 
 // ---- Clicks (one listener for the whole page) ---------------------------------------
+document.addEventListener('mousedown', function (e) { if (e.shiftKey && e.target.closest('.main .task[data-id]')) e.preventDefault(); });
 document.addEventListener('click', function (e) {
   var el = e.target.closest('[data-act],[data-mv],[data-mact],[data-dp],[data-tg],[data-tgbulk],[data-look],[data-mcolor]');
   var menu = $('menu');
@@ -1117,9 +1185,10 @@ document.addEventListener('click', function (e) {
   var act = el.dataset.act, id = el.dataset.id;
   if (act === 'tick') {
     if (e.ctrlKey || e.metaKey) { toggleSel(id); return; }
+    if (e.shiftKey) { rangeSel(id); return; }
     if (Date.now() - S.suppressClick < 700) return;   // the click right after a long-press
     S.focus = id;
-    cycle(id, e.shiftKey ? 'start' : '');
+    cycle(id, e.altKey ? 'start' : '');
   }
   else if (act === 'start') { S.focus = id; cycle(id, 'start'); }
   else if (act === 'tmrw') { moveTo([id], addDays(S.today, 1)); toast('Moved to tomorrow'); }
@@ -1141,7 +1210,9 @@ document.addEventListener('click', function (e) {
   }
   else if (act === 'plus') plusOne(id);
   else if (act === 'menu') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } S.focus = id; openMenu(id, el); }
-  else if (act === 'edit') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } }
+  else if (act === 'edit') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } if (e.shiftKey) { rangeSel(id); return; } }
+  else if (act === 'guidance') { saveSetting('guidance', guide() ? 'off' : 'on'); render(); }
+  else if (act === 'bo') { moveBlock(id, Number(el.dataset.dir)); }
   else if (act === 'view') { S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.date || S.today; render(); }
   else if (act === 'prev' || act === 'next') { var step = S.view === 'day' ? 1 : 7; S.date = addDays(S.date, act === 'prev' ? -step : step); render(); }
   else if (act === 'goday') { S.date = el.dataset.d; S.view = 'day'; render(); }
@@ -1212,7 +1283,23 @@ document.addEventListener('change', function (e) {
   if (el.dataset.field) { var p = {}; p[el.dataset.field] = el.value; change([[el.dataset.id, p]]); }
 });
 document.addEventListener('dblclick', function (e) { var el = e.target.closest('.t[data-id]'); if (el) startEdit(el.dataset.id); });
-function toggleSel(id) { if (S.sel[id]) delete S.sel[id]; else S.sel[id] = true; render(); }
+function toggleSel(id) { if (S.sel[id]) delete S.sel[id]; else S.sel[id] = true; S.anchor = id; render(); }
+// Shift+click: select every task shown between the last clicked one and this one.
+function rangeSel(id) {
+  var rows = Array.prototype.map.call(document.querySelectorAll('.main .task[data-id]'), function (r) { return r.dataset.id; });
+  var a = rows.indexOf(S.anchor), b = rows.indexOf(id);
+  if (a === -1 || b === -1) { toggleSel(id); return; }
+  rows.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(function (x) { S.sel[x] = true; });
+  render();
+}
+// Settings → Block order: swap a top category with its neighbour (saved as the standard day-view order).
+function moveBlock(id, dir) {
+  var cats = categories('main').filter(function (c) { return c.depth === 0; }).map(function (c) { return c.t.id; });
+  var i = cats.indexOf(id), j = i + dir; if (i === -1 || j < 0 || j >= cats.length) return;
+  cats[i] = cats[j]; cats[j] = id;
+  change(cats.map(function (c, k) { return [c, { pos: String((k + 1) * 1000) }]; }));
+  render();
+}
 
 // Editing the text in place (double-click; Enter saves, Esc cancels)
 function startEdit(id) {
@@ -1260,8 +1347,9 @@ document.addEventListener('dragover', function (e) {
   if (!dragId) return;
   var tgt = e.target.closest('[data-drop]'); if (!tgt) return;
   e.preventDefault();
-  document.querySelectorAll('.over').forEach(function (x) { if (x !== tgt) x.classList.remove('over'); });
+  document.querySelectorAll('.over').forEach(function (x) { if (x !== tgt) x.classList.remove('over', 'after'); });
   tgt.classList.add('over');
+  if (tgt.dataset.drop === 'task') { var rr = tgt.getBoundingClientRect(); tgt.classList.toggle('after', e.clientY > rr.top + rr.height / 2); }
   // Holding a task over a tab for a moment opens that view, so you can drop it on the exact day.
   if (tgt.dataset.drop === 'tab' && tgt.dataset.v !== S.view && tabTimerV !== tgt.dataset.v) {
     clearTimeout(tabTimer); tabTimerV = tgt.dataset.v;
@@ -1295,12 +1383,16 @@ document.addEventListener('drop', function (e) {
     change(ids.map(function (id) { return [id, { parent: cat, list: c.list, pos: String(Date.now()) }]; }));
   } else if (kind === 'task') {
     var target = S.tasks[tgt.dataset.id]; if (!target || ids.indexOf(target.id) !== -1) return;
-    var sibs = kids(target.list, target.parent), idx = sibs.indexOf(target);
-    var before = idx > 0 ? Number(sibs[idx - 1].pos) : Number(target.pos) - 1000;
-    var step = (Number(target.pos) - before) / (ids.length + 1);
-    var patch = function (id, i) { var p = { parent: target.parent, list: target.list, pos: String(before + step * (i + 1)) }; if (S.view === 'day' && target.day) p.day = target.day; return [id, p]; };
+    var sibs = kids(target.list, target.parent).filter(function (x) { return ids.indexOf(x.id) === -1; }), idx = sibs.indexOf(target);
+    var tr0 = tgt.getBoundingClientRect(), below = e.clientY > tr0.top + tr0.height / 2;
+    // Above the task: between the one before and this one. Below (lower half): between this one and the next.
+    var lo = below ? Number(target.pos) : (idx > 0 ? Number(sibs[idx - 1].pos) : Number(target.pos) - 1000);
+    var hi = below ? (idx < sibs.length - 1 ? Number(sibs[idx + 1].pos) : Number(target.pos) + 1000) : Number(target.pos);
+    var step = (hi - lo) / (ids.length + 1);
+    var patch = function (id, i) { var p = { parent: target.parent, list: target.list, pos: String(lo + step * (i + 1)) }; if (S.view === 'day' && target.day) p.day = target.day; return [id, p]; };
     change(ids.map(patch));
   }
+  if (ids.length && kind !== 'day' && kind !== 'weekend') noteCat(ids[0]);
   S.sel = {};
 });
 
@@ -1316,8 +1408,21 @@ document.addEventListener('keydown', function (e) {
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField) { e.preventDefault(); undo(); return; }
   if (e.key === 'Escape') { if (S.triage) { triageAct('close'); return; } if (S.selMode) { endSelMode(); return; } closeMenu(); S.sel = {}; S.focus = null; var r = $('results'); if (r) r.remove(); if (inField) e.target.blur(); render(); return; }
+  if (S.triage && e.key === 'Enter' && /^rv_mt_/.test(e.target.id)) { e.preventDefault(); triageAct('meet'); return; }
   if (S.triage) return;   // the morning card uses its own buttons
 
+  // Quick add: Tab / Shift+Tab steps through the #suggestions and fills one in
+  if (e.target.id === 'qa' && e.key === 'Tab') {
+    var opts = document.querySelectorAll('#sugg button');
+    if (opts.length && /#[^\s#]*$/.test(e.target.value)) {
+      e.preventDefault();
+      S.suggPick = ((S.suggPick == null ? -1 : S.suggPick) + (e.shiftKey ? -1 : 1) + opts.length) % opts.length;
+      Array.prototype.forEach.call(opts, function (b, i) { b.classList.toggle('on', i === S.suggPick); });
+      e.target.value = e.target.value.replace(/#[^\s#]*$/, '#' + opts[S.suggPick].dataset.v.replace(/\s+/g, '-'));
+      renderQaCat();
+      return;
+    }
+  }
   // Quick add: Enter adds; the search box searches
   if (e.target.id === 'qa' && e.key === 'Enter') { quickAdd(e.target.value); e.target.value = ''; renderSugg(''); return; }
   if (e.target.dataset && e.target.dataset.addto && e.key === 'Enter') { quickAdd(e.target.value, e.target.dataset.addto); e.target.value = ''; setTimeout(function () { var al = $('al_' + e.target.dataset.addto); if (al) { al.hidden = false; al.querySelector('input').focus(); } }, 40); return; }
@@ -1411,6 +1516,8 @@ document.addEventListener('input', function (e) {
   if (e.target.id === 'qa') renderSugg(e.target.value);
   if (e.target.id === 'search') showResults(e.target.value);
 });
+
+['main', 'side'].forEach(function (k) { var el = $(k); if (el) el.addEventListener('scroll', function () { if ($('menu') && !$('menu').contains(document.activeElement)) closeMenu(); }, { passive: true }); });
 
 // ---- Start -------------------------------------------------------------------------------
 load(false);

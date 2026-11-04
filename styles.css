@@ -226,26 +226,35 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); ou
 /* ---- Print: A4 day sheet like the old PDF (no checkboxes, room for notes on the right) ---- */
 .printhead { display: none; }
 @media print {
-  @page { size: A4; margin: 14mm; }
+  @page { size: A4; margin: 0; }
+  html, body { height: auto !important; overflow: visible !important; }
   html, html[data-mode] { --bg: #fff; --ink: #111; --muted: #333; --faint: #777; --line: #222; }
   body { background: #fff; color: #111; font-size: 11pt; }
   .top, .banner, .tray, .side, .add, .bh .ctl, .more, .box, .plus, .counter, .tag:not(.dl), .meta, .fixed, .results, .menu { display: none !important; }
   .app { display: block; }
-  .main { padding: 0; width: 62%; border-right: 1px dashed #999; padding-right: 8mm; min-height: 250mm; display: block; }
-  .printhead { display: block; margin-bottom: 6mm; }
-  .printhead h2 { margin: 0; font-size: 15pt; }
-  .printhead p { margin: 1mm 0 0; font-size: 9pt; border-bottom: 1.5pt solid #111; padding-bottom: 2mm; }
+  .main { overflow: visible !important; width: 112mm; height: 160mm; padding: 7mm 8mm !important; border-right: 1px dashed #999; border-bottom: 1px dashed #999; display: block; font-size: 6.6pt; line-height: 1.3; }
+  .printhead { display: block; margin-bottom: 4mm; }
+  .printhead h2 { margin: 0; font-size: 10pt; font-weight: 800; }
+  .printhead p { margin: 0.5mm 0 0; font-size: 6.4pt; border-bottom: 1pt solid #111; padding-bottom: 1.5mm; }
+  .printhead p:empty { padding-bottom: 0; }
   .blocks { display: block; }
-  .block { display: block; margin-bottom: 5mm; break-inside: avoid; }
-  .bh { color: #111; border-bottom: 1pt solid #111; font-size: 8.5pt; margin-bottom: 1mm; }
-  .task { border: 0; padding: 0.6mm 0; }
+  .block { display: block; margin: 0 0 3.2mm; break-inside: avoid; }
+  .bh, .block[style*="--cc"] > .bh { color: #111; border: 0; border-bottom: 0.6pt solid #555; padding: 0 0 0.6mm; margin: 0 0 0.8mm; font-size: 6.6pt; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+  .subhdr { font-size: 6.2pt; padding: 1mm 0 0.3mm; color: #444; font-weight: 700; }
+  .fixed { display: block !important; }
+  .fixed .ev { display: block; border: 0; background: none; padding: 0.3mm 0 0.3mm 0.5mm; font-size: 6.6pt; border-radius: 0; }
+  .fixed .ev b { color: #111; }
+  .fixed .ev button, .fixed .empty { display: none; }
+  .task, .task.l1, .task.l2, .task.l3 { border: 0; padding: 0.3mm 0 0.3mm 0.5mm; background: none !important; box-shadow: none !important; }
+  .task.l1 { padding-left: 3mm; } .task.l2, .task.l3 { padding-left: 6mm; }
   .task[data-s="done"] { display: none; }
-  .tx { font-size: 9.5pt; opacity: 1 !important; }
-  .task.must .tx .t { color: #111; }
-  .break { margin-top: 6mm; }
-  .break .task { opacity: 1; color: #888; padding: 0.6mm 0; }
-  .break .bh { color: #888; border-bottom: 0.5pt solid #bbb; }
-  .tag.dl { border: 0; padding: 0; color: #555; background: none; font-size: 8pt; }
+  .tx { font-size: 6.6pt; opacity: 1 !important; gap: 0 4px; }
+  .task.must .tx .t { color: #111; font-weight: 800; }
+  .task.iftime .tx .t { color: #666; }
+  .break { margin-top: 3mm; }
+  .break .task { opacity: 1; color: #777; padding: 0.3mm 0 0.3mm 0.5mm; }
+  .break .bh { color: #777; border-bottom: 0.5pt solid #bbb; }
+  .tag.dl { border: 0; padding: 0; color: #555; background: none; font-size: 6pt; }
 }
 
 /* =====================================================================
@@ -449,6 +458,43 @@ body.selmode .task .t { cursor: pointer; }
 }
 
 .subhdr { list-style: none; font-size: 0.9rem; font-weight: 700; color: var(--ink); padding: 12px 6px 4px; }
+
+/* ---- Patch 5 (4 Nov 2026) ---- */
+/* Computer: the left panel and the main area scroll separately; top bar and quick add stay put */
+@media screen and (min-width: 821px) {
+  html, body { height: 100%; overflow: hidden; }
+  .app { height: 100vh; height: 100dvh; min-height: 0; }
+  .side, .main { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+  .main { --toph: 0px; }
+  .dropcol { top: 8px; }
+  .menu { max-height: calc(100vh - 16px); overflow: auto; }
+}
+/* Block heading: name first, then the ring and count, smaller */
+.bh .ring { margin-left: 2px; }
+/* Drop below a task (lower half) */
+.task.over.after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* "If time" tasks: grey, nice but not necessary */
+.task.iftime:not(.must) .tx .t { color: var(--faint); }
+/* Done today: quiet, always shown; done must-dos lose the must style */
+.donelist .bh { color: var(--done); font-weight: 600; font-size: 0.95rem; }
+.task.must[data-s="done"] .tx .t { font-weight: inherit; color: inherit; }
+/* Must-do strip: white task text, orange label */
+.mchip { color: var(--ink); }
+.muststrip .lbl { color: var(--must); }
+/* Quick add: where a task without #category goes, and the picked suggestion */
+.qacat { font-size: 0.78rem; color: var(--faint); white-space: nowrap; max-width: 30%; overflow: hidden; text-overflow: ellipsis; }
+.sugg button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help .pop .keys { margin-top: 8px; }
+/* Settings icon and block order list */
+.tabs button svg { vertical-align: -3px; }
+.bo-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.bo-row span { flex: 1; }
+/* Morning review: meetings today */
+.rv-meet { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; }
+.rv-meet h4 { margin: 0; font-size: 0.86rem; }
+.rv-meet .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.rv-meet input { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.rv-meet input[type="text"] { flex: 1; min-width: 120px; }
 
 /* ---- Print: leave out the new on-screen helpers ---- */
 @media print {
