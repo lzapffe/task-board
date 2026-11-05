@@ -465,18 +465,17 @@ function dayView(date) {
 
   // Fixed times
   // (hidden when empty, unless guidance texts are on)
-  if (events.length || guide()) html += '<div class="block"><div class="bh">Fixed times</div><div class="fixed">' +
+  if (events.length || guide()) html += '<div class="block fixedblock"><div class="bh">Fixed times</div><div class="fixed">' +
     (events.length ? events.map(function (e) { return '<div class="ev"><b>' + timeText(e.time) + '</b>' + linkify(e.text) + '<button data-act="menu" data-id="' + e.id + '" aria-label="Edit">⋯</button></div>'; }).join('') : '<span class="empty">Nothing fixed. Add one with a time, like "Meeting 13:00".</span>') + '</div></div>';
 
   // Group the day's tasks: carried over, not sorted yet, then one block per top category.
-  // Done tasks leave their block (after a short moment) and go to "Done today" at the bottom.
+  // Done tasks stay where they are in their block (faded and struck through).
   var groups = {}, order = [], doneList = [];
   function group(key, title) { if (!groups[key]) { groups[key] = { title: title, list: [], done: 0 }; order.push(key); } return groups[key]; }
   tasks.filter(isTask).sort(function (a, b) { return (ord[a.id] || 0) - (ord[b.id] || 0); }).forEach(function (t) {
     if (t.parent && onDay[t.parent]) return;
     var c = topCat(t);
     var g = (t.carried && t.carried < date && t.state !== 'done') ? group('carried', 'Carried over') : (!c ? group('unsorted', 'Not sorted yet') : group(c.id, c.text));
-    if (t.state === 'done' && !S.linger[t.id]) { g.done++; doneList.push(t); return; }
     g.list.push(t);
   });
 
@@ -497,7 +496,7 @@ function dayView(date) {
     var ctl = isCatBlock ? '<span class="ctl"><button data-act="grp" data-k="' + k + '" title="Show subheadings for subcategories in this block">' + (grouped ? 'Ungroup' : 'Group by subcategory') + '</button><button data-act="up" data-k="' + k + '" aria-label="Move block up">↑</button><button data-act="down" data-k="' + k + '" aria-label="Move block down">↓</button></span>' :
       (k === 'carried' ? '<span class="ctl"><button data-act="carryall">Move all to ' + (date === S.today ? 'tomorrow' : 'today') + '</button></span>' : '');
     html += '<div class="block" data-key="' + k + '" data-drop="block" data-cat="' + (isCatBlock ? k : '') + '"' + (isCatBlock ? ccStyle(catColor(S.tasks[k])) : '') + '><div class="bh">' +
-      '<span>' + esc(g.title) + '</span>' + (isCatBlock ? ring(doneN, total) : '') + (isCatBlock && !g.list.length ? '<span class="alldone">All done ✓</span>' : '') + ctl + '</div><ul class="tasks">';
+      '<span>' + esc(g.title) + '</span>' + (isCatBlock ? ring(doneN, total) : '') + (isCatBlock && g.list.length && g.list.every(function (t) { return t.state === 'done'; }) ? '<span class="alldone">All done ✓</span>' : '') + ctl + '</div><ul class="tasks">';
     // With "Group by subcategory" on: tasks sorted under a subheading per subcategory (path below the top category).
     var rows = g.list, lastSub = null;
     if (grouped) rows = g.list.slice().sort(function (a, b) { var x = subPath(a), y = subPath(b); return x === y ? 0 : (x === '' ? -1 : y === '' ? 1 : (x < y ? -1 : 1)); });
@@ -522,8 +521,8 @@ function dayView(date) {
   });
   html += '</div>';
 
-  // Done today (folded by default; click to open)
-  if (doneList.length) {
+  // (The "Done today" list was removed on 5 Nov: done tasks stay in their blocks.)
+  if (false && doneList.length) {
     html += '<div class="block donelist" data-key="done"><div class="bh"><button class="fold" data-act="donetoggle" aria-expanded="' + (S.doneOpen ? 'true' : 'false') + '"><span class="car">' + (S.doneOpen ? '▾' : '▸') + '</span>' + (date === S.today ? 'Done today' : 'Done') + ' (' + doneList.length + ')</button></div>';
     if (S.doneOpen) html += '<ul class="tasks">' + doneList.map(function (t) { return taskRow(t, 0, { showPath: true, hideBreak: true }); }).join('') + '</ul>';
     html += '</div>';
@@ -910,7 +909,8 @@ function settingsView() {
     }).join('') +
     (guide() ? '<div class="srow"><label>Always</label><span class="meta">Ctrl+Z undo · Alt+click a circle: started · ↓/↑ also move between tasks once one is picked · Esc closes menus · Ctrl/Cmd-click selects several tasks · Shift+click selects a range</span></div>' : '') + '</section>' +
     // Only in the GitHub Pages version: forget the key on this device.
-    (window.TB_REMOTE ? '<section><h3>This device</h3><div class="srow"><label>Connection</label><button class="btn" data-act="forget">Forget the key on this device</button></div></section>' : '') +
+    (window.TB_REMOTE ? '<section><h3>This device</h3><div class="srow"><label>Connection</label><button class="btn" data-act="forget">Forget the key on this device</button></div>' +
+      '<div class="srow"><label></label><span class="meta">Removes the hub link and the app key from this browser, so this device can no longer open your tasks. Use it on a shared or borrowed computer. To connect again you need the hub link and the app key.</span></div></section>' : '') +
     '</div>';
 }
 function saveSetting(k, v) {
@@ -926,6 +926,7 @@ function renderSel() {
   bar.hidden = !ids.length && !S.selMode;
   if (bar.hidden) return;
   bar.innerHTML = '<b>' + ids.length + ' selected</b>' + (S.selMode ? '<button class="btn" data-act="selall">Select all</button>' : '') +
+    (ids.length ? '<button class="btn" data-act="bulkmenu" title="Change details for all selected tasks">⋯ Edit all</button>' : '') +
     '<button class="btn" data-act="bulk" data-to="today">Today</button><button class="btn" data-act="bulk" data-to="tomorrow">Tomorrow</button>' +
     '<button class="btn" data-act="bulk" data-to="mon">Next Monday</button><button class="btn" data-act="bulk" data-to="week">+1 week</button>' +
     '<button class="btn" data-act="bulk" data-to="sat">Saturday</button><button class="btn" data-act="bulk" data-to="">No date</button>' +
@@ -1016,6 +1017,65 @@ function fitTop(m, r) {
   if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
   return window.scrollY + top;
 }
+// ⋯ for several tasks: each field shows the shared value (blank when they differ); only changed fields are saved.
+function openBulkMenu(ids, anchor) {
+  closeMenu(); if (!ids.length) return;
+  var ts = ids.map(function (x) { return S.tasks[x]; });
+  var same = function (f) { var v = f(ts[0]); return ts.every(function (t) { return f(t) === v; }) ? v : null; };
+  var day = same(function (t) { return t.day || ''; }), dl = same(function (t) { return t.deadline || ''; });
+  var must = same(function (t) { return t.must ? 'yes' : 'no'; }), ift = same(function (t) { return isIfTime(t) ? 'yes' : 'no'; });
+  var list = same(function (t) { return t.list; }), cat = same(function (t) { return topOrParent(t); });
+  var shared = shownTags(ts[0]).filter(function (x) { return ts.every(function (t) { return shownTags(t).map(function (y) { return y.toLowerCase(); }).indexOf(x.toLowerCase()) !== -1; }); });
+  var yn = function (id, cur, label) { return '<label>' + label + '<select id="' + id + '"><option value=""' + (cur === null ? ' selected' : '') + '>' + (cur === null ? '(mixed)' : '(keep)') + '</option><option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>Yes</option><option value="no"' + (cur === 'no' ? ' selected' : '') + '>No</option></select></label>'; };
+  var m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
+  m.innerHTML = '<b>' + ids.length + ' tasks</b>' +
+    '<div class="two"><label>Day<input type="date" id="b_day" value="' + esc(day || '') + '"' + (day === null ? ' placeholder="mixed"' : '') + '></label><label>Deadline<input type="date" id="b_dl" value="' + esc(dl || '') + '"></label></div>' +
+    '<div class="two">' + yn('b_must', must, 'Must do') + yn('b_if', ift, 'If time') + '</div>' +
+    '<label>Tags shared by all (add or remove)<input id="b_tags" value="' + esc(shared.join(', ')) + '"></label>' +
+    '<label>List<select id="b_list"><option value="">' + (list === null ? '(mixed)' : '(keep)') + '</option>' + Object.keys(LISTS).map(function (l) { return '<option value="' + l + '"' + (list === l ? ' selected' : '') + '>' + LISTS[l] + '</option>'; }).join('') + '</select></label>' +
+    '<label>Category<select id="b_cat"><option value="">' + (cat === null ? '(mixed)' : '(keep)') + '</option>' + Object.keys(LISTS).map(function (l) {
+      return categories(l).map(function (c) { return '<option value="' + c.t.id + '"' + (cat === c.t.id ? ' selected' : '') + '>' + esc(LISTS[l]) + ' › ' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('');
+    }).join('') + '</select></label>' +
+    '<div class="row"><button class="btn pri" data-mact="bulksave">Save for all</button><button class="linkbtn" data-mact="close">Close</button></div>';
+  document.body.appendChild(m);
+  m.dataset.bulk = ids.join(',');
+  m.dataset.init = JSON.stringify({ day: day, dl: dl, list: list, cat: cat, tags: shared });
+  var r = anchor.getBoundingClientRect();
+  m.style.top = fitTop(m, r) + 'px';
+  m.style.left = Math.max(8, Math.min(window.scrollX + r.right - 300, document.documentElement.clientWidth - 310)) + 'px';
+}
+function bulkSave() {
+  var m = $('menu'); if (!m || !m.dataset.bulk) return;
+  var ids = m.dataset.bulk.split(',').filter(function (x) { return S.tasks[x]; }), init = JSON.parse(m.dataset.init);
+  var v = function (x) { return $(x).value; };
+  var lower = function (a) { return a.map(function (x) { return x.toLowerCase(); }); };
+  var newTags = v('b_tags').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+  var added = newTags.filter(function (x) { return lower(init.tags).indexOf(x.toLowerCase()) === -1; });
+  var removed = lower(init.tags.filter(function (x) { return lower(newTags).indexOf(x.toLowerCase()) === -1; }));
+  var cat = v('b_cat'), list = v('b_list'), list0 = init.list, cat0 = init.cat;
+  var changes = ids.map(function (id) {
+    var t = S.tasks[id], p = {};
+    if (v('b_day') !== (init.day || '')) { p.day = v('b_day'); p.carried = ''; }
+    if (v('b_dl') !== (init.dl || '')) p.deadline = v('b_dl');
+    if (v('b_must')) p.must = v('b_must') === 'yes' ? 'yes' : '';
+    var tags = tagsOf(t).filter(function (x) { return removed.indexOf(x.toLowerCase()) === -1; });
+    added.forEach(function (x) { if (lower(tags).indexOf(x.toLowerCase()) === -1) tags.push(x); });
+    if (v('b_if') === 'yes' && !isIfTime(t)) tags.push('if time');
+    if (v('b_if') === 'no') tags = tags.filter(function (x) { return x.toLowerCase() !== 'if time'; });
+    if (tags.join(', ') !== tagsOf(t).join(', ')) p.tags = tags.join(', ');
+    // Category wins over list (it decides the list too); a new list alone puts them at its top level
+    if (cat && cat !== (cat0 || '')) { p.parent = cat; p.list = S.tasks[cat].list; p.pos = String(Date.now()); }
+    else if (list && list !== (list0 || '')) { p.list = list; p.parent = ''; }
+    return [id, p];
+  }).filter(function (c) { return Object.keys(c[1]).length; });
+  // Subtasks follow their parent to a new list
+  var extra = [];
+  changes.forEach(function (c) { if (c[1].list) descendants(c[0]).forEach(function (d) { extra.push([d, { list: c[1].list }]); }); });
+  if (changes.length) change(changes.concat(extra));
+  closeMenu();
+  if (S.selMode) endSelMode(); else { S.sel = {}; render(); }
+  toast(changes.length ? 'Changed ' + changes.length + ' task' + (changes.length > 1 ? 's' : '') : 'Nothing changed');
+}
 function topOrParent(t) { var p = S.tasks[t.parent]; return p && p.kind === 'category' ? p.id : (p && p.kind !== 'task' ? p.id : ''); }
 function closeMenu() { var m = $('menu'); if (m) m.remove(); }
 function menuSave(id) {
@@ -1068,8 +1128,15 @@ function parseQuick(text) {
     if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { o.day = od; i++; continue; } }
     if (lw === 'due' && words[i + 1]) { var dd = parseDay(words[i + 1]); if (dd) { o.deadline = dd; i++; continue; } }
     if (w.charAt(0) === '#' && w.length > 1) {
-      var name = w.slice(1).replace(/[-_]/g, ' ').toLowerCase();
-      var c = cats.filter(function (x) { return x.t.text.toLowerCase() === name; })[0] || cats.filter(function (x) { return x.t.text.toLowerCase().indexOf(name) === 0; })[0];
+      var name = w.slice(1).replace(/[-_]/g, ' ').toLowerCase(), c = null;
+      // "#Admin/PhD": the PhD category inside Admin
+      if (name.indexOf('/') !== -1) {
+        var parts = name.split('/'), last = parts.pop().trim(), up = parts.pop().trim();
+        c = cats.filter(function (x) { var pp = S.tasks[x.t.parent]; return x.t.text.toLowerCase() === last && pp && pp.text.toLowerCase() === up; })[0] || null;
+      }
+      // Same name in several places: the one highest up (top level first) wins
+      var byDepth = function (a, b) { return a.depth - b.depth; };
+      if (!c) c = cats.filter(function (x) { return x.t.text.toLowerCase() === name; }).sort(byDepth)[0] || cats.filter(function (x) { return x.t.text.toLowerCase().indexOf(name) === 0; }).sort(byDepth)[0];
       if (c) { o.parent = c.t.id; o.list = c.t.list; } else o.tags.push(name);
       continue;
     }
@@ -1109,9 +1176,16 @@ function renderSugg(val) {
   renderQaCat();
   if (!m) { box.innerHTML = ''; return; }
   var q = m[1].replace(/[-_]/g, ' ').toLowerCase(), seen = {}, out = [];
-  categories('main').concat(categories('weekend')).concat(categories('ideas')).forEach(function (c) { var n = c.t.text; if (n.toLowerCase().indexOf(q) === 0 && !seen[n]) { seen[n] = 1; out.push(['cat', n]); } });
+  // Categories; when a name is used more than once, the deeper ones are shown with their parent ("Admin › PhD")
+  var allCats = categories('main').concat(categories('weekend')).concat(categories('ideas')), count = {};
+  allCats.forEach(function (c) { var k = c.t.text.toLowerCase(); count[k] = (count[k] || 0) + 1; });
+  allCats.slice().sort(function (a, b) { return a.depth - b.depth; }).forEach(function (c) {
+    var n = c.t.text, k = n.toLowerCase(); if (k.indexOf(q) !== 0) return;
+    if (!seen['c:' + k]) { seen['c:' + k] = 1; seen[n] = 1; out.push(['cat', n, n]); return; }
+    var pp = S.tasks[c.t.parent]; if (count[k] > 1 && pp) out.push(['cat', pp.text + '/' + n, pp.text + ' › ' + n]);
+  });
   all().forEach(function (t) { shownTags(t).forEach(function (x) { if (x.toLowerCase().indexOf(q) === 0 && !seen[x]) { seen[x] = 1; out.push(['tag', x]); } }); });
-  box.innerHTML = out.slice(0, 10).map(function (x) { return '<button class="tag ' + (x[0] === 'cat' ? 'g4' : 'g' + tagColor(x[1])) + '" data-act="sugg" data-v="' + esc(x[1]) + '">' + (x[0] === 'cat' ? '▸ ' : '') + esc(x[1]) + '</button>'; }).join('');
+  box.innerHTML = out.slice(0, 10).map(function (x) { return '<button class="tag ' + (x[0] === 'cat' ? 'g4' : 'g' + tagColor(x[1])) + '" data-act="sugg" data-v="' + esc(x[1]) + '">' + (x[0] === 'cat' ? '▸ ' : '') + esc(x[2] || x[1]) + '</button>'; }).join('');
 }
 
 // ---- Search ------------------------------------------------------------------------
@@ -1143,6 +1217,11 @@ document.addEventListener('click', function (e) {
   // Select mode: tapping a task (circle or text) selects or unselects it; nothing else happens on the row
   var selRow = S.selMode && e.target.closest('.main .task[data-id]');
   if (selRow) { e.preventDefault(); if (Date.now() - S.suppressClick < 700) return; toggleSel(selRow.dataset.id); return; }
+  // Several tasks selected: a plain click on empty space or a task's text clears the selection (buttons work as usual)
+  if (!S.selMode && Object.keys(S.sel).length && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
+      !e.target.closest('#selbar, .menu, .overlay, button, a, input, select, textarea, label, summary, .chip, .tag, [data-act]:not([data-act="edit"])')) {
+    S.sel = {}; render(); return;
+  }
   if (!el) return;
 
   // Morning review card
@@ -1173,6 +1252,7 @@ document.addEventListener('click', function (e) {
   }
   if (el.dataset.mact && menu) {
     var id0 = menu.dataset.id, a = el.dataset.mact;
+    if (a === 'bulksave') { bulkSave(); return; }
     if (a === 'save') menuSave(id0);
     if (a === 'close') closeMenu();
     if (a === 'del') {
@@ -1214,7 +1294,7 @@ document.addEventListener('click', function (e) {
   else if (act === 'menu') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } S.focus = id; openMenu(id, el); }
   else if (act === 'edit') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } if (e.shiftKey) { rangeSel(id); return; } }
   else if (act === 'guidance') { saveSetting('guidance', guide() ? 'off' : 'on'); render(); }
-  else if (act === 'bo') { moveBlock(id, Number(el.dataset.dir)); }
+  else if (act === 'bo') { moveStdBlock(id, Number(el.dataset.dir)); }
   else if (act === 'view') { S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.date || S.today; render(); }
   else if (act === 'prev' || act === 'next') { var step = S.view === 'day' ? 1 : 7; S.date = addDays(S.date, act === 'prev' ? -step : step); render(); }
   else if (act === 'goday') { S.date = el.dataset.d; S.view = 'day'; render(); }
@@ -1267,6 +1347,7 @@ document.addEventListener('click', function (e) {
   }
   else if (act === 'clearsel') { if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
   else if (act === 'selall') selectAllShown();
+  else if (act === 'bulkmenu') openBulkMenu(Object.keys(S.sel).filter(function (x) { return S.tasks[x]; }), el);
   else if (act === 'sugg') { var q = $('qa'); q.value = q.value.replace(/#[^\s#]*$/, '#' + el.dataset.v.replace(/\s+/g, '-') + ' '); q.focus(); renderSugg(''); }
   else if (act === 'hit') {
     var t = S.tasks[id]; var rr = $('results'); if (rr) rr.remove();
@@ -1295,7 +1376,7 @@ function rangeSel(id) {
   render();
 }
 // Settings → Block order: swap a top category with its neighbour (saved as the standard day-view order).
-function moveBlock(id, dir) {
+function moveStdBlock(id, dir) {
   var cats = categories('main').filter(function (c) { return c.depth === 0; }).map(function (c) { return c.t.id; });
   var i = cats.indexOf(id), j = i + dir; if (i === -1 || j < 0 || j >= cats.length) return;
   cats[i] = cats[j]; cats[j] = id;
@@ -1307,11 +1388,13 @@ function moveBlock(id, dir) {
 function startEdit(id) {
   var el = document.querySelector('.t[data-id="' + id + '"]'); if (!el) return;
   el.textContent = S.tasks[id].text;
+  // Firefox can't place the cursor with the mouse inside a draggable row, so the row stops being draggable while you edit
+  var row = el.closest('.task'); if (row) row.draggable = false;
   el.contentEditable = 'true'; el.focus();
   var range = document.createRange(); range.selectNodeContents(el); var s = window.getSelection(); s.removeAllRanges(); s.addRange(range);
   function done(save) {
     el.removeEventListener('keydown', key); el.removeEventListener('blur', blur);
-    el.contentEditable = 'false';
+    el.contentEditable = 'false'; if (row) row.draggable = true;
     var v = el.textContent.trim();
     if (save && v && v !== S.tasks[id].text) change([[id, { text: v }]]); else render();
   }
