@@ -1064,6 +1064,8 @@ function parseQuick(text) {
     if (wd !== -1 && /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$/.test(lw) && lw.length <= 9 && ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'tues', 'thur', 'thurs'].indexOf(lw) !== -1) {
       o.day = wd === dow(S.today) ? S.today : nextWeekday(wd); continue;
     }
+    // "on 20/11" (or 20/11/2026, 2026-11-20): put the task on that day
+    if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { o.day = od; i++; continue; } }
     if (lw === 'due' && words[i + 1]) { var dd = parseDay(words[i + 1]); if (dd) { o.deadline = dd; i++; continue; } }
     if (w.charAt(0) === '#' && w.length > 1) {
       var name = w.slice(1).replace(/[-_]/g, ' ').toLowerCase();
@@ -1089,7 +1091,7 @@ function quickAdd(text, parentOverride) {
   // No #category: use the last category you used (if it is in the same list)
   if (!parentOverride && !o.parent) { var lc = lastCatFor(o.list); if (lc) o.parent = lc; }
   var row = { list: o.list, parent: parentOverride || o.parent, kind: o.time ? 'event' : 'task', pos: String(Date.now()), text: o.text, day: o.day, time: o.time, must: o.must, deadline: o.deadline, tags: o.tags.join(', '), state: 'open', source: 'App', span: o.span };
-  if (parentOverride) { var p = S.tasks[parentOverride]; row.list = p.list; if (!/(today|tomorrow|mon|tue|wed|thu|fri|sat|sun)/i.test(text)) row.day = ''; }
+  if (parentOverride) { var p = S.tasks[parentOverride]; row.list = p.list; if (!/(today|tomorrow|mon|tue|wed|thu|fri|sat|sun|\bon \d)/i.test(text)) row.day = ''; }
   change([[id, row]]);
   noteCat(id);
   toast('Added' + (row.day ? ' to ' + shortDate(row.day) : '') + (row.parent && S.tasks[row.parent] ? ' in ' + S.tasks[row.parent].text : ''));

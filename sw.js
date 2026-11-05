@@ -2,7 +2,7 @@
    It only caches the page's own files. Calls to Google (your tasks) are
    never cached, and the page files are fetched fresh first when online,
    so updates you upload to GitHub show up on the next open. */
-var CACHE = 'taskboard-v8';
+var CACHE = 'taskboard-v9';
 var FILES = ['./', 'index.html', 'styles.css', 'connect.css', 'connect.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 // Save the page files when the app is installed.
