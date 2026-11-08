@@ -35,7 +35,7 @@ var S = {
   archive: null,        // Done archive rows (loaded when needed)
   archiveLoading: false,
   triage: null,         // morning review card: {ids, i}
-  cardDay: '',          // day the morning card was last checked
+  dayReloadFor: '',     // local date we last reloaded for (new-day check)
   suppressClick: 0,     // time of a long-press, so the click after it is ignored
   selMode: false, selPushed: false   // phone select mode (long-press a task) and whether it added a back-swipe step
 };
@@ -175,17 +175,15 @@ function load(fresh) {
   google.script.run.withSuccessHandler(function (d) {
     S.tasks = {};
     d.tasks.forEach(function (t) { S.tasks[t.id] = t; });
+    var prevToday = S.today;
     S.arrivals = d.arrivals; S.settings = d.settings; S.today = d.today; S.lastRun = d.lastRun;
     if (!S.date) S.date = d.today;
+    // New day while the board stayed open: move from yesterday to today.
+    if (prevToday && prevToday !== S.today && S.date === prevToday) S.date = S.today;
     S.loadedAt = Date.now();
     applyLook();
     setSave('');
-    render();
-    // The morning review card opens by itself the first time the board is opened each day.
-    if (S.cardDay !== S.today) {
-      S.cardDay = S.today;
-      if (S.view === 'day' && store('card:' + S.today) !== '1') openTriage();
-    }
+    render();   // render() opens the morning review card if it hasn't been shown today (maybeCard)
   }).withFailureHandler(function (e) { setSave('Couldn\'t load: ' + e.message, true); })[fn]();
 }
 // Loads the Done archive once (for Stats and search), then runs cb.
@@ -220,9 +218,22 @@ function flush() {
 }
 function setSave(txt, err) { var el = $('savestate'); if (el) { el.textContent = txt; el.className = 'savestate' + (err ? ' err' : ''); } }
 window.addEventListener('beforeunload', function () { flush(); });
-window.addEventListener('focus', function () {
-  if (!Object.keys(S.dirty).length && !S.saving && Date.now() - S.loadedAt > 120000) load(false);
-});
+// The computer window often stays open overnight: check for a new day when the window gets focus,
+// when it becomes visible again, and every 5 minutes, and reload once when the date has changed.
+function localToday() { return nowIso().slice(0, 10); }
+function quiet() { return !Object.keys(S.dirty).length && !S.saving; }
+function newDayCheck() {
+  var lt = localToday();
+  if (S.today && lt !== S.today && S.dayReloadFor !== lt && quiet()) { S.dayReloadFor = lt; load(false); return true; }
+  return false;
+}
+function onWake() {
+  if (newDayCheck()) return;
+  if (quiet() && Date.now() - S.loadedAt > 120000) load(false);
+}
+window.addEventListener('focus', onWake);
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') onWake(); });
+setInterval(newDayCheck, 5 * 60000);
 
 // ---- Changing tasks (every change can be undone with Ctrl+Z) -------------
 function change(list) {
@@ -328,6 +339,12 @@ function burst(el) {
 function render() {
   if (!S.today) return;
   renderTop(); renderBanner(); renderTray(); renderSide(); renderMain(); renderSel(); renderHint(); setTopHeight();
+  maybeCard();
+}
+// The morning review card opens by itself the first time the Today view is shown each day
+// (on this device). The day only counts as seen once the card has really opened.
+function maybeCard() {
+  if (S.view === 'day' && S.date === S.today && store('card:' + S.today) !== '1' && !$('triage')) openTriage();
 }
 function renderTop() {
   var title, sub;
@@ -720,7 +737,7 @@ function weekendSat() { var d = S.date; var w = dow(d); return w === 6 ? d : (w 
 function weekendView() {
   var sat = weekendSat(), sun = addDays(sat, 1);
   function col(title, list, drop) {
-    return '<div class="wcol' + (drop.wide ? ' wide' : '') + '" data-drop="' + drop.kind + '" data-day="' + drop.day + '"><h3>' + title + '<em>' + list.length + '</em></h3><ul class="tasks">' + list.map(function (t) { return taskRow(t, 0, { showPath: true }); }).join('') + '</ul></div>';
+    return '<div class="wcol' + (drop.wide ? ' wide' : '') + '" data-drop="' + drop.kind + '" data-day="' + drop.day + '" data-wk="' + drop.key + '"><h3>' + title + '<em>' + list.length + '</em></h3><ul class="tasks">' + list.map(function (t) { return taskRow(t, 0, { showPath: true }); }).join('') + '</ul></div>';
   }
   var sTasks = all().filter(function (t) { return isTask(t) && t.day === sat && t.span !== 'weekend'; });
   var suTasks = all().filter(function (t) { return isTask(t) && t.day === sun && t.span !== 'weekend'; });
@@ -731,10 +748,37 @@ function weekendView() {
     var c = topCat(t); var p = pathText(t).toLowerCase();
     return hasTag(t, 'personal') || p.indexOf('personal') !== -1 || (c && c.text.toLowerCase().indexOf('personal') !== -1);
   });
-  return '<div class="wkend">' + col('Saturday ' + pd(sat).getUTCDate(), sTasks, { kind: 'day', day: sat }) + col('Sunday ' + pd(sun).getUTCDate(), suTasks, { kind: 'day', day: sun }) +
-    col('This weekend (either day)', both, { kind: 'weekend', day: sat, wide: true }) + '</div>' +
+  return '<div class="wkend">' + col('Saturday ' + pd(sat).getUTCDate(), wkSort(sat, 'sat', sTasks), { kind: 'day', day: sat, key: 'sat' }) + col('Sunday ' + pd(sun).getUTCDate(), wkSort(sat, 'sun', suTasks), { kind: 'day', day: sun, key: 'sun' }) +
+    col('This weekend (either day)', wkSort(sat, 'both', both), { kind: 'weekend', day: sat, wide: true, key: 'both' }) + '</div>' +
     (left.length ? '<div class="block"><div class="bh">Left over from the week (personal)</div><ul class="tasks">' + left.map(function (t) { return taskRow(t, 0, { showDay: true }); }).join('') + '</ul></div>' : '') +
     '<div class="block"><div class="bh">Ideas</div><ul class="tasks">' + all().filter(function (t) { return t.list === 'ideas' && isTask(t) && t.state !== 'done' && !t.day; }).sort(function (a, b) { return Number(a.pos) - Number(b.pos); }).slice(0, 12).map(function (t) { return taskRow(t, 0); }).join('') + '</ul></div>';
+}
+
+// Your own order in the weekend columns, saved in Settings ("wkorder") so it's the same on every device.
+// Tasks you haven't moved come after the ones you have, in their usual order.
+function wkOrderAll() { return json(S.settings.wkorder || '', {}) || {}; }
+function wkSort(sat, key, list) {
+  var o = (wkOrderAll()[sat] || {})[key] || [];
+  return list.slice().sort(function (a, b) {
+    var ia = o.indexOf(a.id), ib = o.indexOf(b.id);
+    if (ia === -1 && ib === -1) return Number(a.pos) - Number(b.pos);
+    if (ia === -1) return 1; if (ib === -1) return -1; return ia - ib;
+  });
+}
+// Dropped on a task in a weekend column: put it there (moving it to that day if needed), above or below that task.
+function wkDrop(ids, tgt, below) {
+  var wc = tgt.closest('.wcol'), key = wc.dataset.wk, sat = weekendSat(), sun = addDays(sat, 1);
+  var span = key === 'both' ? 'weekend' : '', day = key === 'sun' ? sun : sat;
+  var mv = ids.filter(function (id) { var x = S.tasks[id]; return x && ((x.span || '') !== span || (key === 'both' ? (x.day !== sat && x.day !== sun) : x.day !== day)); });
+  if (mv.length) moveTo(mv, day, { span: span });
+  var order = Array.prototype.map.call(wc.querySelectorAll('.task[data-id]'), function (r) { return r.dataset.id; }).filter(function (id) { return ids.indexOf(id) === -1; });
+  var at = order.indexOf(tgt.dataset.id); at = at === -1 ? order.length : at + (below ? 1 : 0);
+  order.splice.apply(order, [at, 0].concat(ids));
+  var all = wkOrderAll(), keep = {};
+  Object.keys(all).forEach(function (k) { if (k >= addDays(sat, -7)) keep[k] = all[k]; });   // forget old weekends
+  keep[sat] = keep[sat] || {}; keep[sat][key] = order;
+  saveSetting('wkorder', JSON.stringify(keep));
+  S.sel = {}; render();
 }
 
 // ---- Lists view (outline on the left, day boxes on the right) -----------------------
@@ -1110,6 +1154,7 @@ function menuSave(id) {
 function parseQuick(text) {
   var o = { text: [], day: S.view === 'lists' ? '' : S.date, time: '', must: '', deadline: '', tags: [], parent: '', list: S.view === 'lists' ? S.list : 'main', span: '' };
   if (S.view === 'weekend') { o.day = weekendSat(); o.list = 'weekend'; o.span = 'weekend'; }
+  var dayWord = false;
   var words = text.split(/\s+/);
   var cats = categories('main').concat(categories('weekend')).concat(categories('ideas'));
   for (var i = 0; i < words.length; i++) {
@@ -1118,14 +1163,14 @@ function parseQuick(text) {
     if (w === '!') { o.must = 'yes'; continue; }
     if (w === '~') { o.tags.push('if time'); continue; }
     if (/^\d{1,2}[:.]\d{2}(-\d{1,2}[:.]\d{2})?$/.test(w)) { o.time = w.replace(/\./g, ':'); continue; }
-    if (lw === 'today') { o.day = S.today; continue; }
-    if (lw === 'tomorrow') { o.day = addDays(S.today, 1); continue; }
-    if (lw === 'nodate') { o.day = ''; continue; }
+    if (lw === 'today') { o.day = S.today; dayWord = true; continue; }
+    if (lw === 'tomorrow') { o.day = addDays(S.today, 1); dayWord = true; continue; }
+    if (lw === 'nodate') { o.day = ''; dayWord = true; continue; }
     if (wd !== -1 && /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$/.test(lw) && lw.length <= 9 && ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'tues', 'thur', 'thurs'].indexOf(lw) !== -1) {
-      o.day = wd === dow(S.today) ? S.today : nextWeekday(wd); continue;
+      o.day = wd === dow(S.today) ? S.today : nextWeekday(wd); dayWord = true; continue;
     }
     // "on 20/11" (or 20/11/2026, 2026-11-20): put the task on that day
-    if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { o.day = od; i++; continue; } }
+    if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { o.day = od; dayWord = true; i++; continue; } }
     if (lw === 'due' && words[i + 1]) { var dd = parseDay(words[i + 1]); if (dd) { o.deadline = dd; i++; continue; } }
     if (w.charAt(0) === '#' && w.length > 1) {
       var name = w.slice(1).replace(/[-_]/g, ' ').toLowerCase(), c = null;
@@ -1143,6 +1188,8 @@ function parseQuick(text) {
     o.text.push(w);
   }
   o.text = o.text.join(' ').trim();
+  // A day word (today, sunday, on 20/11 …) means that exact day, not "either day this weekend"
+  if (dayWord) o.span = '';
   return o;
 }
 function parseDay(s) {
@@ -1459,6 +1506,10 @@ document.addEventListener('drop', function (e) {
     var rids = S.triage.sel[dragId] ? Object.keys(S.triage.sel) : [dragId];
     if (kind === 'day') { triageAct('date', tgt.dataset.day, null, rids); }
     return;
+  }
+  if (kind === 'task' && S.view === 'weekend' && tgt.closest('.wcol')) {
+    if (ids.indexOf(tgt.dataset.id) !== -1) return;
+    var wr = tgt.getBoundingClientRect(); wkDrop(ids, tgt, e.clientY > wr.top + wr.height / 2); return;
   }
   if (kind === 'day') moveTo(ids, tgt.dataset.day, { span: '' });
   else if (kind === 'weekend') moveTo(ids, tgt.dataset.day, { span: 'weekend' });

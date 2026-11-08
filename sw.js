@@ -2,7 +2,7 @@
    It only caches the page's own files. Calls to Google (your tasks) are
    never cached, and the page files are fetched fresh first when online,
    so updates you upload to GitHub show up on the next open. */
-var CACHE = 'taskboard-v10';
+var CACHE = 'taskboard-v11';
 var FILES = ['./', 'index.html', 'styles.css', 'connect.css', 'connect.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 // Save the page files when the app is installed.
@@ -14,7 +14,7 @@ self.addEventListener('install', function (e) {
 // Remove caches from older versions.
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.filter(function (k) { return k.indexOf('taskboard-') === 0 && k !== CACHE; }).map(function (k) { return caches.delete(k); }));
   }));
   self.clients.claim();
 });
