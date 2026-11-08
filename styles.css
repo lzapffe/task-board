@@ -484,6 +484,11 @@ body.selmode .task .t { cursor: pointer; }
 .bh .ring { margin-left: 2px; }
 /* Drop below a task (lower half) */
 .task.over.after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* Drop on the middle of a task = make it a subtask */
+.task.over.inside { box-shadow: inset 0 0 0 2px var(--accent); }
+/* "Work on" sessions */
+.wkon { font-size: 0.7rem; font-weight: 600; letter-spacing: .02em; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; white-space: nowrap; }
+.mhint { color: var(--faint); font-size: 0.74rem; margin: -2px 0 6px; }
 /* "If time" tasks: grey, nice but not necessary */
 .task.iftime:not(.must) .tx .t { color: var(--faint); }
 /* Done today: quiet, always shown; done must-dos lose the must style */

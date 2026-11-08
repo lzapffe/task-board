@@ -238,6 +238,7 @@ setInterval(newDayCheck, 5 * 60000);
 // ---- Changing tasks (every change can be undone with Ctrl+Z) -------------
 function change(list) {
   // list = [[id, patch], ...]; patch null = delete (with its subtasks)
+  list = followChanges(list);
   var entry = [], now = nowIso();
   list.forEach(function (pair) {
     var id = pair[0], patch = pair[1], t = S.tasks[id];
@@ -259,6 +260,29 @@ function change(list) {
   if (entry.length) { S.undo.push(entry); if (S.undo.length > 60) S.undo.shift(); }
   scheduleSave(); render();
 }
+// Extra changes that go with a change (and are undone with it):
+// - a task moves to another day → its unfinished subtasks that were on the same day move with it
+//   (a subtask with its own, different day stays where it is);
+// - a big task is ticked off or deleted → its unfinished "work on" sessions are removed.
+function followChanges(list) {
+  var seen = {}, extra = [];
+  list.forEach(function (c) { seen[c[0]] = true; });
+  var add = function (id, patch) { if (!seen[id]) { seen[id] = true; extra.push([id, patch]); } };
+  list.forEach(function (c) {
+    var id = c[0], patch = c[1], t = S.tasks[id];
+    if (!t) return;
+    var openSessions = function () { return all().filter(function (x) { return x.work_of === id && x.state !== 'done'; }); };
+    if (patch === null) { openSessions().forEach(function (x) { add(x.id, null); }); return; }
+    if (patch.day !== undefined && patch.day !== t.day && t.day) {
+      descendants(id).forEach(function (d) {
+        var x = S.tasks[d];
+        if (x && isTask(x) && x.state !== 'done' && x.day === t.day) add(d, { day: patch.day, carried: '' });
+      });
+    }
+    if (patch.state === 'done' && t.state !== 'done' && !t.work_of) openSessions().forEach(function (x) { add(x.id, null); });
+  });
+  return list.concat(extra);
+}
 function undo() {
   var entry = S.undo.pop(); if (!entry) return;
   var now = nowIso();
@@ -269,7 +293,7 @@ function undo() {
   scheduleSave(); render(); toast('Undone');
 }
 function blank() {
-  return { id: '', list: 'main', parent: '', kind: 'task', pos: String(Date.now()), text: '', day: '', time: '', span: '', deadline: '', must: '', state: 'open', count: '', count_of: '', tags: '', note: '', source: 'App', carried: '', created: '', updated: '', done_at: '', status: '', next: '', keep_days: '', details: '', sort: '', color: '' };
+  return { id: '', list: 'main', parent: '', kind: 'task', pos: String(Date.now()), text: '', day: '', time: '', span: '', deadline: '', must: '', state: 'open', count: '', count_of: '', tags: '', note: '', source: 'App', carried: '', created: '', updated: '', done_at: '', status: '', next: '', keep_days: '', details: '', sort: '', color: '', work_of: '' };
 }
 function toast(msg) { setSave(msg); }
 
@@ -299,6 +323,9 @@ function cycle(id, mode) {
     if (sibs.every(function (s) { return s.id === id || s.state === 'done'; }) && p.state !== 'done') { list.push([p.id, { state: 'done' }]); burstEl = 'parent'; }
   }
   if (patch.state === 'done' && kids(t.list, t.id).some(isTask)) burstEl = 'parent';
+  // A "work on" session ticked off: the big task counts as started
+  var big = t.work_of && S.tasks[t.work_of];
+  if (patch.state === 'done' && big && (big.state || 'open') === 'open') list.push([big.id, { state: 'started' }]);
   var row = document.querySelector('.task[data-id="' + id + '"]');
   var block = row && row.closest('.block');
   change(list);
@@ -338,6 +365,7 @@ function burst(el) {
 // ---- Rendering: top bar, banner, tray, side panel, main ---------------------
 function render() {
   if (!S.today) return;
+  S.sessMap = null;
   renderTop(); renderBanner(); renderTray(); renderSide(); renderMain(); renderSel(); renderHint(); setTopHeight();
   maybeCard();
 }
@@ -412,7 +440,29 @@ function renderSide() {
   }
   $('side').innerHTML = html;
 }
-function openCount(catId) { return descendants(catId).filter(function (id) { var t = S.tasks[id]; return t && isTask(t) && t.state !== 'done'; }).length; }
+function openCount(catId) { return descendants(catId).filter(function (id) { var t = S.tasks[id]; return t && isTask(t) && t.state !== 'done' && !t.work_of; }).length; }
+// "Work on" sessions by big task id (rebuilt on every render).
+function sessionsOf(id) {
+  if (!S.sessMap) { var m = {}; all().forEach(function (x) { if (x.work_of) (m[x.work_of] = m[x.work_of] || []).push(x); }); S.sessMap = m; }
+  return S.sessMap[id] || [];
+}
+// Plan a "work on" session for a big task on a day: a separate task that only stands for that day's work.
+function makeSession(mainId, day) {
+  var m = S.tasks[mainId]; if (!m || !day) return;
+  var keep = tagsOf(m).filter(function (x) { return ['work', 'personal'].indexOf(x.toLowerCase()) !== -1; });
+  change([[newId(), { list: m.list, parent: nearestCat(m), kind: 'task', text: m.text, day: day, state: 'open', pos: String(Date.now()), source: 'App', work_of: m.id, tags: keep.join(', ') }]]);
+  toast('Work session on ' + shortDate(day));
+}
+// Make tasks subtasks of a task (drag onto the middle of it, or "Subtask of" in ⋯). They take its day.
+function nestInto(ids, targetId) {
+  var target = S.tasks[targetId]; if (!target || !isTask(target) || target.work_of) return;
+  var ok = ids.filter(function (id) { var t = S.tasks[id]; return t && isTask(t) && !t.work_of && id !== targetId && descendants(id).indexOf(targetId) === -1; });
+  if (!ok.length) return;
+  var list = ok.map(function (id, i) { return [id, { parent: targetId, list: target.list, pos: String(Date.now() + i), day: target.day, span: target.span, carried: '' }]; });
+  ok.forEach(function (id) { descendants(id).forEach(function (d) { if (S.tasks[d].list !== target.list) list.push([d, { list: target.list }]); }); });
+  change(list);
+  toast((ok.length > 1 ? ok.length + ' tasks are' : 'Now a') + ' subtask' + (ok.length > 1 ? 's' : '') + ' of "' + target.text + '"');
+}
 function renderMain() {
   var m = $('main');
   if (S.view === 'day') m.innerHTML = dayView(S.date);
@@ -444,6 +494,14 @@ function taskRow(t, level, opts) {
   if (opts.showPath) { var p = pathText(t); if (p) bits += '<span class="meta">' + esc(p) + '</span>'; }
   if (t.note && opts.showNote) bits += '<span class="meta">' + esc(t.note) + '</span>';
   if (cnt) bits += '<span class="cnt">' + (Number(t.count) || 0) + ' / ' + esc(t.count_of) + '</span><button class="plus" data-act="plus" data-id="' + t.id + '" aria-label="Add one">+</button>';
+  if (!t.work_of) {
+    var ses = sessionsOf(t.id);
+    if (ses.length) {
+      var sd = ses.filter(function (x) { return x.state === 'done'; }).map(function (x) { return x.day || (x.done_at || '').slice(0, 10); }).sort();
+      var nx = ses.filter(function (x) { return x.state !== 'done' && x.day; }).map(function (x) { return x.day; }).sort();
+      bits += '<span class="meta">' + sd.length + ' session' + (sd.length === 1 ? '' : 's') + (sd.length ? ' · last ' + esc(shortDate(sd[sd.length - 1])) : '') + (nx.length ? ' · next ' + esc(shortDate(nx[0])) : '') + '</span>';
+    }
+  }
   if (opts.sub) bits += '<span class="meta" style="margin-left:auto">' + esc(opts.sub) + '</span>';
   var lv = Math.min(level || 0, 3);
   var hasDet = String(t.details || '').trim() !== '', detOpen = hasDet && S.openDet[t.id];
@@ -455,7 +513,7 @@ function taskRow(t, level, opts) {
   return '<li class="task l' + lv + (t.must ? ' must' : '') + (isIfTime(t) ? ' iftime' : '') + (S.sel[t.id] ? ' sel' : '') + (S.focus === t.id ? ' kfocus' : '') + (S.flash === t.id ? ' flash' : '') + '" data-id="' + t.id + '" data-s="' + esc(t.state || 'open') + '" draggable="true" data-drop="task">' +
     (cnt ? '<span class="counter" style="width:' + Math.min(100, (Number(t.count) || 0) / Number(t.count_of) * 100) + '%"></span>' : '') +
     '<button class="box" data-act="tick" data-id="' + t.id + '" aria-label="Tick off" title="Tick off (Alt+click: started)"></button>' +
-    '<div class="tx"><span class="t" data-act="edit" data-id="' + t.id + '">' + linkify(t.text) + '</span>' +
+    '<div class="tx">' + (t.work_of ? '<span class="wkon" title="A work session: ticking it off counts as worked on, the big task stays">Work on</span>' : '') + '<span class="t" data-act="edit" data-id="' + t.id + '">' + linkify(t.text) + '</span>' +
     (hasDet ? '<button class="det-btn' + (detOpen ? ' on' : '') + '" data-act="det" data-id="' + t.id + '" aria-expanded="' + (detOpen ? 'true' : 'false') + '">' + (detOpen ? '▾' : '▸') + ' details</button>' : '') + bits + '</div>' +
     qa + '<button class="more" data-act="menu" data-id="' + t.id + '" aria-label="More">⋯</button></li>' +
     (detOpen ? '<li class="details l' + lv + '">' + linkify(t.details) + '</li>' : '');
@@ -804,6 +862,7 @@ function listView() {
         html += '<div class="addline" hidden id="al_' + t.id + '"><input data-addto="' + t.id + '" placeholder="New task under ' + esc(t.text) + '"></div>';
       } else if (t.kind === 'task' || t.kind === 'event') {
         if (t.state === 'done' && !S.showDone) return;
+        if (t.work_of) return;   // "work on" sessions only show on their days
         html += taskRow(t, level, { showDay: true, showNote: false });
         walk(t.id, depth, level + 1);
       }
@@ -1046,7 +1105,10 @@ function openMenu(id, anchor) {
       '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_if" ' + (isIfTime(t) ? 'checked' : '') + ' style="width:auto"> If time</label>' +
       '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_wk" ' + (t.span === 'weekend' ? 'checked' : '') + ' style="width:auto"> Whole weekend</label></div>' +
       '<label>List<select id="m_list">' + Object.keys(LISTS).map(function (l) { return '<option value="' + l + '"' + (t.list === l ? ' selected' : '') + '>' + LISTS[l] + '</option>'; }).join('') + '</select></label>' +
-      '<label>Category<select id="m_cat"><option value="">(none)</option>' + categories(t.list).map(function (c) { return '<option value="' + c.t.id + '"' + (topOrParent(t) === c.t.id ? ' selected' : '') + '>' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('') + '</select></label>') +
+      '<label>Category<select id="m_cat"><option value="">(none)</option>' + categories(t.list).map(function (c) { return '<option value="' + c.t.id + '"' + (topOrParent(t) === c.t.id ? ' selected' : '') + '>' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('') + '</select></label>' +
+      (t.work_of ? '<p class="mhint">Work session for "' + esc(S.tasks[t.work_of] ? S.tasks[t.work_of].text : t.text) + '". Ticking it off or deleting it leaves the big task as it is.</p>' : subOfField(t) +
+        '<label>Work on it (a session for one day; the task itself stays)</label><div class="row"><button class="btn" data-mact="workon" data-d="today">Today</button><button class="btn" data-mact="workon" data-d="tomorrow">Tomorrow</button>' +
+        '<input type="date" id="m_wod" style="width:auto"><button class="btn" data-mact="workon" data-d="pick">Add</button></div>')) +
     '<div class="row"><button class="btn pri" data-mact="save">Save</button>' + (isCat ? '' : '<button class="btn" data-mact="sub">+ Subtask</button>') + '<button class="btn warn" data-mact="del">Delete</button><button class="linkbtn" data-mact="close">Close</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
@@ -1054,6 +1116,15 @@ function openMenu(id, anchor) {
   m.style.left = Math.max(8, Math.min(window.scrollX + r.right - 300, document.documentElement.clientWidth - 310)) + 'px';
   m.dataset.id = id;
   var first = m.querySelector('textarea'); if (first) first.focus();
+}
+// "Subtask of" in the ⋯ menu: open tasks in the same category (change the category first to pick from another one).
+function subOfField(t) {
+  var cur = S.tasks[t.parent] && S.tasks[t.parent].kind === 'task' ? t.parent : '', cat = nearestCat(t), mine = descendants(t.id);
+  var opts = all().filter(function (x) { return isTask(x) && !x.work_of && x.id !== t.id && x.list === t.list && mine.indexOf(x.id) === -1 && nearestCat(x) === cat && (x.state !== 'done' || x.id === cur); })
+    .sort(function (a, b) { return Number(a.pos) - Number(b.pos); });
+  return '<label>Subtask of<select id="m_subof"><option value="">(not a subtask)</option>' + opts.map(function (x) {
+    var txt = String(x.text); return '<option value="' + x.id + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(txt.length > 60 ? txt.slice(0, 58) + '…' : txt) + '</option>'; }).join('') + '</select></label>' +
+    (cur ? '<p class="mhint">Moves with the main task when it is on the same day. Give it its own day to keep it separate.</p>' : '');
 }
 // Places a pop-up under its button, or higher up if it would run off the bottom of the window.
 function fitTop(m, r) {
@@ -1136,7 +1207,12 @@ function menuSave(id) {
     patch.must = $('m_must').checked ? 'yes' : ''; patch.span = $('m_wk').checked ? 'weekend' : '';
     if (patch.day !== t.day) patch.carried = '';
     var newList = v('m_list'), newCat = v('m_cat');
-    if (newList !== t.list) { patch.list = newList; patch.parent = ''; }
+    var curSub = S.tasks[t.parent] && S.tasks[t.parent].kind === 'task' ? t.parent : '', subOf = v('m_subof');
+    if (subOf !== undefined && subOf !== curSub) {
+      if (subOf) { var P = S.tasks[subOf]; patch.parent = subOf; patch.list = P.list; patch.pos = String(Date.now()); if (patch.day === t.day) { patch.day = P.day; patch.span = P.span; } }
+      else { patch.parent = nearestCat(t); patch.pos = String(Date.now()); }
+    }
+    else if (newList !== t.list) { patch.list = newList; patch.parent = ''; }
     else if (newCat !== topOrParent(t) && !(S.tasks[t.parent] && S.tasks[t.parent].kind === 'task')) { patch.parent = newCat; patch.pos = String(Date.now()); }
     var list = [[id, patch]];
     if (patch.list) descendants(id).forEach(function (d) { list.push([d, { list: newList }]); });
@@ -1307,6 +1383,7 @@ document.addEventListener('click', function (e) {
       if ((dt0.kind === 'category' || dt0.kind === 'header') && inside && !confirm('Delete "' + dt0.text + '" and the ' + inside + ' task(s) inside it? (Ctrl+Z undoes it.)')) return;
       change([[id0, null]]); closeMenu(); toast('Deleted (Ctrl+Z to undo)');
     }
+    if (a === 'workon') { var wd = el.dataset.d === 'pick' ? $('m_wod').value : bulkTarget(el.dataset.d); if (!wd) { $('m_wod').focus(); return; } makeSession(id0, wd); closeMenu(); return; }
     if (a === 'sub') { var p = S.tasks[id0], nid = newId(); change([[nid, { list: p.list, parent: p.id, kind: 'task', text: 'New subtask', day: p.day, state: 'open', pos: String(Date.now()), source: 'App' }]]); closeMenu(); setTimeout(function () { startEdit(nid); }, 30); }
     return;
   }
@@ -1474,20 +1551,28 @@ document.addEventListener('dragstart', function (e) {
   dragId = el.dataset.id; el.classList.add('dragging');
   try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) {}
 });
-document.addEventListener('dragend', function (e) { dragId = null; clearTimeout(tabTimer); tabTimerV = ''; document.querySelectorAll('.dragging,.over').forEach(function (x) { x.classList.remove('dragging', 'over'); }); });
+document.addEventListener('dragend', function (e) { dragId = null; clearTimeout(tabTimer); tabTimerV = ''; document.querySelectorAll('.dragging,.over').forEach(function (x) { x.classList.remove('dragging', 'over', 'after', 'inside'); }); });
 document.addEventListener('dragover', function (e) {
   if (!dragId) return;
   var tgt = e.target.closest('[data-drop]'); if (!tgt) return;
   e.preventDefault();
-  document.querySelectorAll('.over').forEach(function (x) { if (x !== tgt) x.classList.remove('over', 'after'); });
+  document.querySelectorAll('.over').forEach(function (x) { if (x !== tgt) x.classList.remove('over', 'after', 'inside'); });
   tgt.classList.add('over');
-  if (tgt.dataset.drop === 'task') { var rr = tgt.getBoundingClientRect(); tgt.classList.toggle('after', e.clientY > rr.top + rr.height / 2); }
+  if (tgt.dataset.drop === 'task') { var z = dropZone(tgt, e); tgt.classList.toggle('after', z === 'after'); tgt.classList.toggle('inside', z === 'inside'); }
   // Holding a task over a tab for a moment opens that view, so you can drop it on the exact day.
   if (tgt.dataset.drop === 'tab' && tgt.dataset.v !== S.view && tabTimerV !== tgt.dataset.v) {
     clearTimeout(tabTimer); tabTimerV = tgt.dataset.v;
     tabTimer = setTimeout(function () { S.view = tabTimerV; tabTimerV = ''; render(); }, 600);
   }
 });
+// Where on a task row the drop lands: top part = above, bottom part = below, middle = inside (subtask).
+function dropZone(tgt, e) {
+  var r = tgt.getBoundingClientRect(), f = (e.clientY - r.top) / (r.height || 1);
+  var t = S.tasks[tgt.dataset.id], d = S.tasks[dragId];
+  var canNest = t && isTask(t) && !t.work_of && d && isTask(d) && !d.work_of && !tgt.closest('#triage');
+  if (canNest && f > 0.3 && f < 0.7) return 'inside';
+  return f >= 0.5 ? 'after' : 'before';
+}
 document.addEventListener('drop', function (e) {
   if (!dragId) return;
   var tgt = e.target.closest('[data-drop]'); if (!tgt) return;
@@ -1507,6 +1592,7 @@ document.addEventListener('drop', function (e) {
     if (kind === 'day') { triageAct('date', tgt.dataset.day, null, rids); }
     return;
   }
+  if (kind === 'task' && dropZone(tgt, e) === 'inside') { nestInto(ids, tgt.dataset.id); S.sel = {}; return; }
   if (kind === 'task' && S.view === 'weekend' && tgt.closest('.wcol')) {
     if (ids.indexOf(tgt.dataset.id) !== -1) return;
     var wr = tgt.getBoundingClientRect(); wkDrop(ids, tgt, e.clientY > wr.top + wr.height / 2); return;
