@@ -687,7 +687,7 @@ function renderTriage() {
       '<div class="row">' +
       '<button class="btn pri" data-tg="today" data-id="' + t.id + '">' + (t.day === S.today ? 'Keep today' : 'Today') + '</button><button class="btn" data-tg="tomorrow" data-id="' + t.id + '">Tomorrow</button><button class="btn" data-tg="mon" data-id="' + t.id + '">Next Mon</button>' +
       '<input type="date" data-tgdate="' + t.id + '" aria-label="Pick a day"><button class="btn" data-tg="nodate" data-id="' + t.id + '">No date</button>' +
-      '<button class="btn" data-tg="done" data-id="' + t.id + '">Done</button><button class="btn warn" data-tg="delete" data-id="' + t.id + '">Delete</button><button class="linkbtn" data-tg="skip" data-id="' + t.id + '">Skip</button></div></div>';
+      '<button class="btn" data-tg="done" data-id="' + t.id + '">Done</button>' + (t.carried || (t.day && t.day < S.today) ? '<button class="btn" data-tg="doneprev" data-id="' + t.id + '" title="Ticked off as done on ' + esc(shortDate(prevWorkday())) + '">' + prevWorkdayLabel() + '</button>' : '') + '<button class="btn warn" data-tg="delete" data-id="' + t.id + '">Delete</button><button class="linkbtn" data-tg="skip" data-id="' + t.id + '">Skip</button></div></div>';
   }).join('') : '<div class="empty rv-empty">All reviewed ✓</div>';
 
   var d = document.createElement('div'); d.className = 'overlay'; d.id = 'triage';
@@ -696,12 +696,15 @@ function renderTriage() {
     '<div class="rv-grid"><div class="rv-days">' +
     '<div class="rv-meet"><h4>Meetings today</h4><div class="row"><input type="time" id="rv_mt_time" aria-label="Starts"><input type="time" id="rv_mt_end" aria-label="Ends (optional)"><input type="text" id="rv_mt_text" placeholder="Meeting"><button class="btn pri" data-tg="meet">Add</button></div></div>' +
     left + '</div><div class="rv-side">' +
-    (nSel ? '<div class="rv-bulk"><b>' + nSel + ' selected:</b><button class="btn" data-tgbulk="today">Today</button><button class="btn" data-tgbulk="tomorrow">Tomorrow</button><button class="btn" data-tgbulk="mon">Next Mon</button><button class="btn" data-tgbulk="nodate">No date</button><button class="btn" data-tgbulk="done">Done</button><button class="btn warn" data-tgbulk="delete">Delete</button><button class="linkbtn" data-tgbulk="clear">Clear</button></div>' :
+    (nSel ? '<div class="rv-bulk"><b>' + nSel + ' selected:</b><button class="btn" data-tgbulk="today">Today</button><button class="btn" data-tgbulk="tomorrow">Tomorrow</button><button class="btn" data-tgbulk="mon">Next Mon</button><button class="btn" data-tgbulk="nodate">No date</button><button class="btn" data-tgbulk="doneprev">' + prevWorkdayLabel() + '</button><button class="btn" data-tgbulk="done">Done</button><button class="btn warn" data-tgbulk="delete">Delete</button><button class="linkbtn" data-tgbulk="clear">Clear</button></div>' :
       (items.length > 1 ? '<div class="rv-bulk meta"><button class="linkbtn" data-tgbulk="all">Select all</button></div>' : '')) +
     '<div class="rv-list">' + right + '</div></div></div></div>';
   document.body.appendChild(d);
   if (keepScroll) { var a = d.querySelector('.rv-days'), b = d.querySelector('.rv-list'); if (a) a.scrollTop = keepScroll[0] || 0; if (b) b.scrollTop = keepScroll[1] || 0; }
 }
+// The last working day: yesterday, or Friday when today is Saturday, Sunday or Monday.
+function prevWorkday() { var w = dow(S.today); return addDays(S.today, w === 6 ? -1 : w === 0 ? -2 : w === 1 ? -3 : -1); }
+function prevWorkdayLabel() { var w = dow(S.today); return 'Done ' + (w === 6 || w === 0 || w === 1 ? 'Friday' : 'yesterday'); }
 // One review action on one task (or, with ids, on several).
 function triageAct(a, val, id, ids) {
   var tr = S.triage; if (!tr) return;
@@ -724,6 +727,8 @@ function triageAct(a, val, id, ids) {
     var extra = cat && S.tasks[cat] ? { parent: cat, list: S.tasks[cat].list } : {};
     var day = { today: S.today, tomorrow: addDays(S.today, 1), mon: nextWeekday(1), nodate: '', date: val }[a];
     if (a === 'done') list.push([x, Object.assign({ state: 'done' }, extra)]);
+    // Done on the last working day: the task is ticked off on that day (it counts there in the done log)
+    else if (a === 'doneprev') { var pw = prevWorkday(); list.push([x, Object.assign({ state: 'done', day: pw, carried: '', done_at: pw + 'T16:00:00' }, extra)]); }
     else if (a === 'delete') list.push([x, null]);
     else if (day !== undefined) list.push([x, Object.assign({ day: day, carried: '', span: '' }, extra)]);
   });
