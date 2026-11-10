@@ -489,6 +489,16 @@ body.selmode .task .t { cursor: pointer; }
 /* "Work on" sessions */
 .wkon { font-size: 0.7rem; font-weight: 600; letter-spacing: .02em; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; white-space: nowrap; }
 .mhint { color: var(--faint); font-size: 0.74rem; margin: -2px 0 6px; }
+/* Backup days: the faint line on a backup day, the note about moved tasks, the toast with a button */
+.task.ghost { opacity: 0.5; }
+.task.ghost .t { font-style: italic; }
+.wt.bk { opacity: 0.5; font-style: italic; }
+.bknote { font-size: 0.82rem; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
+.bknote b { color: var(--ink); font-weight: 600; }
+.bkchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.bkchips span { font-size: 0.78rem; border: 1px solid var(--line); border-radius: 12px; padding: 1px 4px 1px 8px; }
+.bkchips button { background: none; border: 0; color: var(--faint); cursor: pointer; padding: 0 4px; }
+#atoast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 60; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: flex; gap: 12px; align-items: center; font-size: 0.88rem; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
 /* "If time" tasks: grey, nice but not necessary */
 .task.iftime:not(.must) .tx .t { color: var(--faint); }
 /* Done today: quiet, always shown; done must-dos lose the must style */

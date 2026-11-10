@@ -273,6 +273,8 @@ function followChanges(list) {
     if (!t) return;
     var openSessions = function () { return all().filter(function (x) { return x.work_of === id && x.state !== 'done'; }); };
     if (patch === null) { openSessions().forEach(function (x) { add(x.id, null); }); return; }
+    if (patch.day !== undefined && patch.backup_days === undefined && t.backup_days && patch.day !== t.day)
+      patch.backup_days = patch.day ? backups(t).filter(function (b) { return b > patch.day; }).join(',') : '';
     if (patch.day !== undefined && patch.day !== t.day && t.day) {
       descendants(id).forEach(function (d) {
         var x = S.tasks[d];
@@ -293,7 +295,7 @@ function undo() {
   scheduleSave(); render(); toast('Undone');
 }
 function blank() {
-  return { id: '', list: 'main', parent: '', kind: 'task', pos: String(Date.now()), text: '', day: '', time: '', span: '', deadline: '', must: '', state: 'open', count: '', count_of: '', tags: '', note: '', source: 'App', carried: '', created: '', updated: '', done_at: '', status: '', next: '', keep_days: '', details: '', sort: '', color: '', work_of: '' };
+  return { id: '', list: 'main', parent: '', kind: 'task', pos: String(Date.now()), text: '', day: '', time: '', span: '', deadline: '', must: '', state: 'open', count: '', count_of: '', tags: '', note: '', source: 'App', carried: '', created: '', updated: '', done_at: '', status: '', next: '', keep_days: '', details: '', sort: '', color: '', work_of: '', backup_days: '', bumped_from: '', bumped_on: '' };
 }
 function toast(msg) { setSave(msg); }
 
@@ -305,6 +307,12 @@ function cycle(id, mode) {
   var next = mode === 'start' ? (cur === 'started' ? 'open' : 'started') : (cur === 'done' ? 'open' : 'done');
   var patch = { state: next };
   if (cnt && mode !== 'start') patch = next === 'open' ? { state: 'open', count: '0' } : { state: 'done', count: t.count_of };
+  // Done ahead of time (a future day): it moves to today. Done on a past day: it stays there and counts on that day.
+  if (patch.state === 'done' && t.state !== 'done' && isTask(t)) {
+    if (t.day && t.day > S.today) { patch.day = S.today; patch.carried = ''; }
+    else if (t.day && t.day < S.today) patch.done_at = t.day + 'T16:00:00';
+    if (t.backup_days) patch.backup_days = '';
+  }
   var cel = S.settings.celebrate || 'all';
   if (next === 'done' && cel !== 'off') {
     // Gentle effect on the task, which stays in place for a moment before moving to "Done".
@@ -384,7 +392,7 @@ function renderTop() {
   else if (S.view === 'stats') { title = 'Stats'; sub = 'What you got done'; }
   else { title = 'Settings'; sub = ''; }
   var arrows = ['day', 'week', 'weekend'].indexOf(S.view) !== -1;
-  var todays = all().filter(function (t) { return isTask(t) && t.day === S.date; });
+  var todays = all().filter(function (t) { return isTask(t) && onDay(t, S.date); });
   var done = todays.filter(function (t) { return t.state === 'done'; }).length;
   var views = [['day', 'Today'], ['week', 'Week'], ['lists', 'Lists'], ['weekend', 'Weekend'], ['categories', 'Categories'], ['stats', 'Stats'], ['settings', ICON.gear]];
   var wkStart = mondayOf(S.today);
@@ -429,7 +437,7 @@ function renderSide() {
     var mon = mondayOf(S.date);
     var rows = [0, 1, 2, 3, 4].map(function (i) { return addDays(mon, i); });
     html += '<div><h4>Week ' + isoWeek(mon) + '</h4><ul>' + rows.map(function (d) {
-      var ts = all().filter(function (t) { return isTask(t) && t.day === d; });
+      var ts = all().filter(function (t) { return isTask(t) && onDay(t, d); });
       var dn = ts.filter(function (t) { return t.state === 'done'; }).length;
       return '<li data-act="goday" data-d="' + d + '" data-drop="day" data-day="' + d + '" class="' + (S.view === 'day' && S.date === d ? 'on' : '') + '">' + shortDate(d) + (d === S.today ? ' · today' : '') +
         '<em>' + (d <= S.today ? dn + '/' + ts.length : ts.length) + '</em>' + (ts.length && d <= S.today ? '<span class="mbar"><i style="width:' + dn / ts.length * 100 + '%"></i></span>' : '') + '</li>';
@@ -452,6 +460,34 @@ function makeSession(mainId, day) {
   var keep = tagsOf(m).filter(function (x) { return ['work', 'personal'].indexOf(x.toLowerCase()) !== -1; });
   change([[newId(), { list: m.list, parent: nearestCat(m), kind: 'task', text: m.text, day: day, state: 'open', pos: String(Date.now()), source: 'App', work_of: m.id, tags: keep.join(', ') }]]);
   toast('Work session on ' + shortDate(day));
+}
+// ---- Backup days ("if not done, then on …") ----
+// A task can have backup days: it shows faintly on them (and counts there); if it isn't done on its day,
+// the morning update moves it to the next backup day instead of carrying it over. Done = gone from them all.
+function backups(t) { return String((t && t.backup_days) || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean).sort(); }
+function isBackupOn(t, d) { return !!d && isTask(t) && t.state !== 'done' && !!t.day && t.day !== d && backups(t).indexOf(d) !== -1; }
+function onDay(t, d) { return t.day === d || isBackupOn(t, d); }
+// Add day d as a backup day for these tasks (an earlier day than the task's own becomes its day instead).
+function addBackup(ids, d) {
+  var list = [];
+  ids.forEach(function (id) {
+    var t = S.tasks[id]; if (!t || !isTask(t) || !d) return;
+    if (!t.day) { list.push([id, { day: d, carried: '' }]); return; }
+    if (d === t.day) return;
+    var all2 = backups(t).concat([d, t.day]).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
+    var first = d < t.day ? d : t.day;
+    list.push([id, { day: first, carried: d < t.day ? '' : t.carried, backup_days: all2.filter(function (x) { return x > first; }).join(',') }]);
+  });
+  if (list.length) change(list);
+}
+// A short message with a button (e.g. "Tue added as backup · Move instead").
+function actionToast(msg, label, fn) {
+  var old = $('atoast'); if (old) old.remove();
+  var d = document.createElement('div'); d.id = 'atoast';
+  d.innerHTML = '<span>' + esc(msg) + '</span><button class="btn">' + esc(label) + '</button>';
+  d.querySelector('button').onclick = function () { d.remove(); fn(); };
+  document.body.appendChild(d);
+  setTimeout(function () { if (d.parentNode) d.remove(); }, 8000);
 }
 // Make tasks subtasks of a task (drag onto the middle of it, or "Subtask of" in ⋯). They take its day.
 function nestInto(ids, targetId) {
@@ -502,6 +538,8 @@ function taskRow(t, level, opts) {
       bits += '<span class="meta">' + sd.length + ' session' + (sd.length === 1 ? '' : 's') + (sd.length ? ' · last ' + esc(shortDate(sd[sd.length - 1])) : '') + (nx.length ? ' · next ' + esc(shortDate(nx[0])) : '') + '</span>';
     }
   }
+  if (opts.ghost) bits += '<span class="meta">backup · only if not done ' + esc(shortDate(t.day)) + '</span>';
+  else if (t.state !== 'done' && backups(t).length) bits += '<span class="meta">else ' + esc(backups(t).map(shortDate).join(', ')) + '</span>';
   if (opts.sub) bits += '<span class="meta" style="margin-left:auto">' + esc(opts.sub) + '</span>';
   var lv = Math.min(level || 0, 3);
   var hasDet = String(t.details || '').trim() !== '', detOpen = hasDet && S.openDet[t.id];
@@ -510,7 +548,7 @@ function taskRow(t, level, opts) {
     '<button data-act="tmrw" data-id="' + t.id + '" title="Move to tomorrow" aria-label="Move to tomorrow">' + ICON.next + '</button>' +
     '<button data-act="datechip" data-f="day" data-id="' + t.id + '" title="Pick a day" aria-label="Pick a day">' + ICON.cal + '</button>' +
     '<button data-act="musttog" data-id="' + t.id + '" title="Must do on/off" aria-label="Must do on or off">!</button></span>';
-  return '<li class="task l' + lv + (t.must ? ' must' : '') + (isIfTime(t) ? ' iftime' : '') + (S.sel[t.id] ? ' sel' : '') + (S.focus === t.id ? ' kfocus' : '') + (S.flash === t.id ? ' flash' : '') + '" data-id="' + t.id + '" data-s="' + esc(t.state || 'open') + '" draggable="true" data-drop="task">' +
+  return '<li class="task l' + lv + (t.must ? ' must' : '') + (isIfTime(t) ? ' iftime' : '') + (S.sel[t.id] ? ' sel' : '') + (S.focus === t.id ? ' kfocus' : '') + (S.flash === t.id ? ' flash' : '') + (opts.ghost ? ' ghost' : '') + '" data-id="' + t.id + '" data-s="' + esc(t.state || 'open') + '"' + (opts.ghost ? ' draggable="false"' : ' draggable="true" data-drop="task"') + '>' +
     (cnt ? '<span class="counter" style="width:' + Math.min(100, (Number(t.count) || 0) / Number(t.count_of) * 100) + '%"></span>' : '') +
     '<button class="box" data-act="tick" data-id="' + t.id + '" aria-label="Tick off" title="Tick off (Alt+click: started)"></button>' +
     '<div class="tx">' + (t.work_of ? '<span class="wkon" title="A work session: ticking it off counts as worked on, the big task stays">Work on</span>' : '') + '<span class="t" data-act="edit" data-id="' + t.id + '">' + linkify(t.text) + '</span>' +
@@ -522,6 +560,8 @@ function taskRow(t, level, opts) {
 // ---- Day view ------------------------------------------------------------
 function dayView(date) {
   var tasks = all().filter(function (t) { return t.day === date && (t.kind === 'task' || t.kind === 'event'); });
+  var ghosts = all().filter(function (t) { return isBackupOn(t, date); }), isGhost = {};
+  ghosts.forEach(function (t) { isGhost[t.id] = true; });
   var events = tasks.filter(function (t) { return t.kind === 'event'; }).sort(function (a, b) { return a.time < b.time ? -1 : 1; });
   var ord = orderIndex();
   var onDay = {}; tasks.forEach(function (t) { onDay[t.id] = true; });
@@ -532,6 +572,7 @@ function dayView(date) {
     var pend = triageItems().length;
     if (pend) html += '<div class="triagebar"><span><b>' + pend + '</b> to review (carried over, unsorted or deadlines)</span><button class="btn pri" data-act="triage">Review now</button></div>';
   }
+  if (date === S.today) html += bumpedNote();
 
   // Must-do strip: all of the day's must-do tasks in one row
   var musts = tasks.filter(function (t) { return isTask(t) && t.must && t.state !== 'done'; });
@@ -547,8 +588,8 @@ function dayView(date) {
   // Done tasks stay where they are in their block (faded and struck through).
   var groups = {}, order = [], doneList = [];
   function group(key, title) { if (!groups[key]) { groups[key] = { title: title, list: [], done: 0 }; order.push(key); } return groups[key]; }
-  tasks.filter(isTask).sort(function (a, b) { return (ord[a.id] || 0) - (ord[b.id] || 0); }).forEach(function (t) {
-    if (t.parent && onDay[t.parent]) return;
+  tasks.filter(isTask).concat(ghosts).sort(function (a, b) { return (ord[a.id] || 0) - (ord[b.id] || 0); }).forEach(function (t) {
+    if (t.parent && onDay[t.parent] && !isGhost[t.id]) return;
     var c = topCat(t);
     var g = (t.carried && t.carried < date && t.state !== 'done') ? group('carried', 'Carried over') : (!c ? group('unsorted', 'Not sorted yet') : group(c.id, c.text));
     g.list.push(t);
@@ -582,8 +623,8 @@ function dayView(date) {
     }).map(function (p) { return p[0]; });
     rows.forEach(function (t) {
       if (grouped) { var sp = subPath(t); if (sp !== lastSub) { lastSub = sp; if (sp) html += '<li class="subhdr">' + esc(sp) + '</li>'; } }
-      html += taskRow(t, 0, { showPath: !isCatBlock, hideBreak: true });
-      (function subs(parent, level) {
+      html += taskRow(t, 0, { showPath: !isCatBlock, hideBreak: true, ghost: isGhost[t.id] });
+      if (!isGhost[t.id]) (function subs(parent, level) {
         kids(parent.list, parent.id).forEach(function (s) {
           if (!isTask(s)) return;
           if (s.day && s.day !== date) return;
@@ -666,7 +707,7 @@ function renderTriage() {
 
   // Left: the coming days with what's already planned (drop a task on a day to move it there)
   var left = reviewDays().map(function (d) {
-    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && t.day === d && t.state !== 'done' && !reviewIds[t.id]; })
+    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && onDay(t, d) && t.state !== 'done' && !reviewIds[t.id]; })
       .sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1) || Number(a.pos) - Number(b.pos); });
     var musts = ts.filter(function (t) { return t.must; }).length;
     return '<div class="rv-day' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h4>' + (d === S.today ? 'Today · ' : '') + esc(shortDate(d)) +
@@ -698,9 +739,15 @@ function renderTriage() {
     left + '</div><div class="rv-side">' +
     (nSel ? '<div class="rv-bulk"><b>' + nSel + ' selected:</b><button class="btn" data-tgbulk="today">Today</button><button class="btn" data-tgbulk="tomorrow">Tomorrow</button><button class="btn" data-tgbulk="mon">Next Mon</button><button class="btn" data-tgbulk="nodate">No date</button><button class="btn" data-tgbulk="doneprev">' + prevWorkdayLabel() + '</button><button class="btn" data-tgbulk="done">Done</button><button class="btn warn" data-tgbulk="delete">Delete</button><button class="linkbtn" data-tgbulk="clear">Clear</button></div>' :
       (items.length > 1 ? '<div class="rv-bulk meta"><button class="linkbtn" data-tgbulk="all">Select all</button></div>' : '')) +
-    '<div class="rv-list">' + right + '</div></div></div></div>';
+    '<div class="rv-list">' + right + bumpedNote() + '</div></div></div></div>';
   document.body.appendChild(d);
   if (keepScroll) { var a = d.querySelector('.rv-days'), b = d.querySelector('.rv-list'); if (a) a.scrollTop = keepScroll[0] || 0; if (b) b.scrollTop = keepScroll[1] || 0; }
+}
+// Tasks the morning update moved to their backup day today (instead of carrying them over).
+function bumpedNote() {
+  var b = all().filter(function (t) { return isTask(t) && t.bumped_on === S.today && t.state !== 'done' && t.bumped_from; });
+  if (!b.length) return '';
+  return '<div class="bknote">Moved to their backup day instead of carried over: ' + b.map(function (t) { return '<b>' + esc(t.text) + '</b> (' + esc(shortDate(t.bumped_from)) + ' → ' + esc(shortDate(t.day)) + ')'; }).join(', ') + '</div>';
 }
 // The last working day: yesterday, or Friday when today is Saturday, Sunday or Monday.
 function prevWorkday() { var w = dow(S.today); return addDays(S.today, w === 6 ? -1 : w === 0 ? -2 : w === 1 ? -3 : -1); }
@@ -788,9 +835,9 @@ function weekView() {
   var mon = mondayOf(S.date), html = '<div class="week">';
   for (var i = 0; i < 7; i++) {
     var d = addDays(mon, i);
-    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && t.day === d; }).sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1); });
+    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && onDay(t, d); }).sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1); });
     html += '<div class="wcol' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h3 data-act="goday" data-d="' + d + '">' + shortDate(d) + '<em>' + ts.filter(isTask).length + '</em></h3>' +
-      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.state === 'done' ? ' done' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
+      ts.map(function (t) { var n = colorOf(t), bk = t.day !== d; return '<div class="wt' + (t.must ? ' must' : '') + (t.state === 'done' ? ' done' : '') + (t.kind === 'event' ? ' ev' : '') + (bk ? ' bk' : '') + '" draggable="' + (bk ? 'false' : 'true') + '" data-id="' + t.id + '" data-act="menu"' + (bk ? ' title="Backup day: only if not done ' + esc(shortDate(t.day)) + '"' : '') + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + (bk ? ' (backup)' : '') + '</div>'; }).join('') + '</div>';
   }
   return html + '</div>';
 }
@@ -884,7 +931,7 @@ function dropColumn() {
   var html = '<div class="dropcol"><h4>Drop on a day</h4>';
   for (var i = 0; i < 7; i++) {
     var d = addDays(mon, i);
-    var ts = all().filter(function (t) { return isTask(t) && t.day === d && t.state !== 'done'; });
+    var ts = all().filter(function (t) { return isTask(t) && onDay(t, d) && t.state !== 'done'; });
     html += '<div class="dbox' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><b>' + shortDate(d) + '<em>' + ts.length + '</em></b>' + ts.slice(0, 3).map(function (t) { return '<span>' + esc(t.text) + '</span>'; }).join('') + '</div>';
   }
   return html + '<div class="dbox" data-drop="day" data-day="' + addDays(mon, 7) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div>';
@@ -897,11 +944,11 @@ function planColumns() {
   var html = '<div class="plancol"><div class="planhead"><button class="iconbtn" data-act="planprev" aria-label="Previous week">‹</button><b>Week ' + isoWeek(mon) + ' · ' + shortDate(mon) + ' – ' + shortDate(addDays(mon, 4)) + '</b><button class="iconbtn" data-act="plannext" aria-label="Next week">›</button></div><div class="plancols">';
   for (var i = 0; i < 5; i++) {
     var d = addDays(mon, i);
-    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && t.day === d && t.state !== 'done'; })
+    var ts = all().filter(function (t) { return (isTask(t) || t.kind === 'event') && onDay(t, d) && t.state !== 'done'; })
       .sort(function (a, b) { return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1) || (a.time < b.time ? -1 : 1); });
     var musts = ts.filter(function (t) { return t.must; }).length;
     html += '<div class="pcol' + (d === S.today ? ' today' : '') + '" data-drop="day" data-day="' + d + '"><h3 data-act="goday" data-d="' + d + '">' + shortDate(d) + '<em>' + ts.filter(isTask).length + ' tasks' + (musts ? ' · ' + musts + ' must' : '') + '</em></h3>' +
-      ts.map(function (t) { var n = colorOf(t); return '<div class="wt' + (t.must ? ' must' : '') + (t.kind === 'event' ? ' ev' : '') + '" draggable="true" data-id="' + t.id + '" data-act="menu"' + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + '</div>'; }).join('') + '</div>';
+      ts.map(function (t) { var n = colorOf(t), bk = t.day !== d; return '<div class="wt' + (t.must ? ' must' : '') + (t.kind === 'event' ? ' ev' : '') + (bk ? ' bk' : '') + '" draggable="' + (bk ? 'false' : 'true') + '" data-id="' + t.id + '" data-act="menu"' + (bk ? ' title="Backup day: only if not done ' + esc(shortDate(t.day)) + '"' : '') + (n ? ' style="border-left:3px solid var(--t' + n + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + (bk ? ' (backup)' : '') + '</div>'; }).join('') + '</div>';
   }
   return html + '</div><div class="planextra"><div class="dbox" data-drop="weekend" data-day="' + addDays(mon, 5) + '"><b>Weekend<em></em></b></div><div class="dbox" data-drop="day" data-day="' + addDays(mon, 7) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div></div>';
 }
@@ -1095,6 +1142,8 @@ function openMenu(id, anchor) {
   m.innerHTML = (isCat ? '' :
     '<div class="row"><button class="btn" data-mv="today">Today</button><button class="btn" data-mv="tomorrow">Tomorrow</button><button class="btn" data-mv="mon">Next Mon</button><button class="btn" data-mv="week">+1 week</button><button class="btn" data-mv="sat">Saturday</button><button class="btn" data-mv="">No date</button></div>' +
     '<div class="two"><label>Day<input type="date" id="m_day" value="' + esc(t.day) + '"></label><label>Starts (fixed time)<input type="time" id="m_time" value="' + esc(String(t.time).split('-')[0]) + '"></label></div>' +
+    (t.kind === 'task' ? '<label>Backup days (only if not done by then)</label><input type="hidden" id="m_bk" value="' + esc(backups(t).join(',')) + '"><div class="bkchips" id="m_bkl">' + bkChips(backups(t)) + '</div>' +
+      '<div class="row"><input type="date" id="m_bkd" style="width:auto"><button class="btn" data-mact="bkadd">Add backup day</button></div>' : '') +
     '<div class="two"><span></span><label>Ends (optional)<input type="time" id="m_end" value="' + esc(String(t.time).split('-')[1] || '') + '"></label></div>') +
     '<label>Text<textarea id="m_text" rows="2">' + esc(t.text) + '</textarea></label>' +
     (isCat ? '<label>' + (t.kind === 'category' ? 'Inside (parent category)' : 'Label inside') + '<select id="m_parent">' + (t.kind === 'category' ? '<option value="">(Top level)</option>' : '') +
@@ -1131,6 +1180,7 @@ function subOfField(t) {
     var txt = String(x.text); return '<option value="' + x.id + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(txt.length > 60 ? txt.slice(0, 58) + '…' : txt) + '</option>'; }).join('') + '</select></label>' +
     (cur ? '<p class="mhint">Moves with the main task when it is on the same day. Give it its own day to keep it separate.</p>' : '');
 }
+function bkChips(list) { return list.map(function (d) { return '<span>' + esc(shortDate(d)) + '<button data-mact="bkrm" data-d="' + d + '" aria-label="Remove backup day">×</button></span>'; }).join(''); }
 // Places a pop-up under its button, or higher up if it would run off the bottom of the window.
 function fitTop(m, r) {
   var h = m.offsetHeight, vh = window.innerHeight, top = r.bottom + 4;
@@ -1209,6 +1259,12 @@ function menuSave(id) {
     var keep = tagsOf(t).filter(function (x) { return ['work', 'personal'].indexOf(x.toLowerCase()) !== -1; });
     patch.tags = v('m_tags').split(',').map(function (x) { return x.trim(); }).filter(Boolean).concat(keep).concat($('m_if').checked ? ['if time'] : []).join(', ');
     patch.note = v('m_note'); patch.details = v('m_det');
+    if ($('m_bk')) {
+      // Backup days: only days after the task's day; one before it becomes the day itself
+      var bl = v('m_bk') ? v('m_bk').split(',') : [];
+      if (patch.day && bl.some(function (x) { return x < patch.day; })) { bl.push(patch.day); bl.sort(); patch.day = bl.shift(); }
+      patch.backup_days = patch.day ? bl.filter(function (x, i, a) { return x > patch.day && a.indexOf(x) === i; }).join(',') : '';
+    }
     patch.must = $('m_must').checked ? 'yes' : ''; patch.span = $('m_wk').checked ? 'weekend' : '';
     if (patch.day !== t.day) patch.carried = '';
     var newList = v('m_list'), newCat = v('m_cat');
@@ -1235,23 +1291,30 @@ function menuSave(id) {
 function parseQuick(text) {
   var o = { text: [], day: S.view === 'lists' ? '' : S.date, time: '', must: '', deadline: '', tags: [], parent: '', list: S.view === 'lists' ? S.list : 'main', span: '' };
   if (S.view === 'weekend') { o.day = weekendSat(); o.list = 'weekend'; o.span = 'weekend'; }
-  var dayWord = false;
+  var dayWord = false, elseNext = false;
+  o.backups = [];
+  // "else thu" / "else 20/11": a backup day (if not done by then). Several are fine: "tue, else thu, else mon".
+  var setDay = function (d) { if (elseNext) { if (d) o.backups.push(d); elseNext = false; } else { o.day = d; dayWord = true; } };
   var words = text.split(/\s+/);
   var cats = categories('main').concat(categories('weekend')).concat(categories('ideas'));
   for (var i = 0; i < words.length; i++) {
     var w = words[i], lw = w.toLowerCase();
+    if (lw === 'else' || lw === ',else') { elseNext = true; continue; }
+    // a day word followed by a comma ("tue,") still counts as a day word
+    if (/^(today|tomorrow|mon|tue|wed|thu|fri|sat|sun)[a-z]*,$|^\d{1,2}[\/.]\d{1,2}([\/.]\d{2,4})?,$/.test(lw)) { w = w.slice(0, -1); lw = lw.slice(0, -1); }
     var wd = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(lw.slice(0, 3));
     if (w === '!') { o.must = 'yes'; continue; }
     if (w === '~') { o.tags.push('if time'); continue; }
     if (/^\d{1,2}[:.]\d{2}(-\d{1,2}[:.]\d{2})?$/.test(w)) { o.time = w.replace(/\./g, ':'); continue; }
-    if (lw === 'today') { o.day = S.today; dayWord = true; continue; }
-    if (lw === 'tomorrow') { o.day = addDays(S.today, 1); dayWord = true; continue; }
+    if (lw === 'today') { setDay(S.today); continue; }
+    if (lw === 'tomorrow') { setDay(addDays(S.today, 1)); continue; }
     if (lw === 'nodate') { o.day = ''; dayWord = true; continue; }
     if (wd !== -1 && /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$/.test(lw) && lw.length <= 9 && ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'tues', 'thur', 'thurs'].indexOf(lw) !== -1) {
-      o.day = wd === dow(S.today) ? S.today : nextWeekday(wd); dayWord = true; continue;
+      setDay(wd === dow(S.today) ? S.today : nextWeekday(wd)); continue;
     }
     // "on 20/11" (or 20/11/2026, 2026-11-20): put the task on that day
-    if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { o.day = od; dayWord = true; i++; continue; } }
+    if (lw === 'on' && words[i + 1]) { var od = parseDay(words[i + 1]); if (od) { setDay(od); i++; continue; } }
+    if (elseNext && parseDay(lw)) { setDay(parseDay(lw)); continue; }
     if (lw === 'due' && words[i + 1]) { var dd = parseDay(words[i + 1]); if (dd) { o.deadline = dd; i++; continue; } }
     if (w.charAt(0) === '#' && w.length > 1) {
       var name = w.slice(1).replace(/[-_]/g, ' ').toLowerCase(), c = null;
@@ -1271,6 +1334,7 @@ function parseQuick(text) {
   o.text = o.text.join(' ').trim();
   // A day word (today, sunday, on 20/11 …) means that exact day, not "either day this weekend"
   if (dayWord) o.span = '';
+  o.backups = o.backups.filter(function (d, i, a) { return o.day && d > o.day && a.indexOf(d) === i; }).sort();
   return o;
 }
 function parseDay(s) {
@@ -1285,7 +1349,7 @@ function quickAdd(text, parentOverride) {
   var id = newId();
   // No #category: use the last category you used (if it is in the same list)
   if (!parentOverride && !o.parent) { var lc = lastCatFor(o.list); if (lc) o.parent = lc; }
-  var row = { list: o.list, parent: parentOverride || o.parent, kind: o.time ? 'event' : 'task', pos: String(Date.now()), text: o.text, day: o.day, time: o.time, must: o.must, deadline: o.deadline, tags: o.tags.join(', '), state: 'open', source: 'App', span: o.span };
+  var row = { list: o.list, parent: parentOverride || o.parent, kind: o.time ? 'event' : 'task', pos: String(Date.now()), text: o.text, day: o.day, time: o.time, must: o.must, deadline: o.deadline, tags: o.tags.join(', '), state: 'open', source: 'App', span: o.span, backup_days: (o.backups || []).join(',') };
   if (parentOverride) { var p = S.tasks[parentOverride]; row.list = p.list; if (!/(today|tomorrow|mon|tue|wed|thu|fri|sat|sun|\bon \d)/i.test(text)) row.day = ''; }
   change([[id, row]]);
   noteCat(id);
@@ -1387,6 +1451,12 @@ document.addEventListener('click', function (e) {
       var dt0 = S.tasks[id0], inside = descendants(id0).filter(function (x) { return S.tasks[x] && isTask(S.tasks[x]); }).length;
       if ((dt0.kind === 'category' || dt0.kind === 'header') && inside && !confirm('Delete "' + dt0.text + '" and the ' + inside + ' task(s) inside it? (Ctrl+Z undoes it.)')) return;
       change([[id0, null]]); closeMenu(); toast('Deleted (Ctrl+Z to undo)');
+    }
+    if (a === 'bkadd' || a === 'bkrm') {
+      var hv = $('m_bk'), cur = hv.value ? hv.value.split(',') : [];
+      if (a === 'bkadd') { var nd = $('m_bkd').value; if (!nd) { $('m_bkd').focus(); return; } if (cur.indexOf(nd) === -1) cur.push(nd); $('m_bkd').value = ''; }
+      else cur = cur.filter(function (x) { return x !== el.dataset.d; });
+      cur.sort(); hv.value = cur.join(','); $('m_bkl').innerHTML = bkChips(cur); return;
     }
     if (a === 'workon') { var wd = el.dataset.d === 'pick' ? $('m_wod').value : bulkTarget(el.dataset.d); if (!wd) { $('m_wod').focus(); return; } makeSession(id0, wd); closeMenu(); return; }
     if (a === 'sub') { var p = S.tasks[id0], nid = newId(); change([[nid, { list: p.list, parent: p.id, kind: 'task', text: 'New subtask', day: p.day, state: 'open', pos: String(Date.now()), source: 'App' }]]); closeMenu(); setTimeout(function () { startEdit(nid); }, 30); }
@@ -1554,7 +1624,7 @@ var dragId = null, tabTimer = null, tabTimerV = '';
 document.addEventListener('dragstart', function (e) {
   var el = e.target.closest('[data-id][draggable="true"]'); if (!el) return;
   dragId = el.dataset.id; el.classList.add('dragging');
-  try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) {}
+  try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'copyMove'; } catch (x) {}
 });
 document.addEventListener('dragend', function (e) { dragId = null; clearTimeout(tabTimer); tabTimerV = ''; document.querySelectorAll('.dragging,.over').forEach(function (x) { x.classList.remove('dragging', 'over', 'after', 'inside'); }); });
 document.addEventListener('dragover', function (e) {
@@ -1601,6 +1671,17 @@ document.addEventListener('drop', function (e) {
   if (kind === 'task' && S.view === 'weekend' && tgt.closest('.wcol')) {
     if (ids.indexOf(tgt.dataset.id) !== -1) return;
     var wr = tgt.getBoundingClientRect(); wkDrop(ids, tgt, e.clientY > wr.top + wr.height / 2); return;
+  }
+  // Ctrl (or Cmd) + drop on a day: add it as a backup day instead of moving.
+  // In Lists: a task with a day (today or later) dropped on a later day gets it as a backup day, with "Move instead".
+  if ((kind === 'day' || kind === 'weekend') && tgt.dataset.day && !S.triage) {
+    var bday = tgt.dataset.day;
+    if (e.ctrlKey || e.metaKey) { addBackup(ids, bday); S.sel = {}; toast(shortDate(bday) + ' added as a backup day'); return; }
+    if (S.view === 'lists' && kind === 'day' && ids.every(function (id) { var x = S.tasks[id]; return x && isTask(x) && x.state !== 'done' && x.day && x.day >= S.today && bday > x.day; })) {
+      addBackup(ids, bday); S.sel = {};
+      actionToast(shortDate(bday) + ' added as backup day', 'Move instead', function () { undo(); moveTo(ids, bday, { span: '' }); });
+      return;
+    }
   }
   if (kind === 'day') moveTo(ids, tgt.dataset.day, { span: '' });
   else if (kind === 'weekend') moveTo(ids, tgt.dataset.day, { span: 'weekend' });
