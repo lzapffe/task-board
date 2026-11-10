@@ -198,6 +198,9 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); ou
 .selbar input[type="date"] { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 .menu { position: absolute; z-index: 50; width: 300px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); padding: 10px; display: grid; gap: 8px; font-size: 0.85rem; }
 .menu .row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.catpick { display: grid; gap: 2px; max-height: 320px; overflow: auto; }
+.catpick .catopt { text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 7px; color: var(--ink); font: inherit; cursor: pointer; }
+.catpick .catopt:hover, .catpick .catopt:focus-visible { background: var(--bg); }
 .menu label { color: var(--muted); font-size: 0.76rem; font-weight: 700; display: grid; gap: 2px; }
 .menu input, .menu textarea, .menu select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; width: 100%; }
 .menu .two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }

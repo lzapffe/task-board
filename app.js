@@ -172,9 +172,15 @@ function categories(list) {
 function load(fresh) {
   var fn = fresh ? 'api_runUpdate' : 'api_getData';
   setSave(fresh ? 'Updating…' : 'Loading…');
+  S.touched = {};   // tasks changed while this load is on its way (see keepLocal below)
   google.script.run.withSuccessHandler(function (d) {
+    // The answer was read from the sheet before any change made in the meantime, so for tasks
+    // changed since the load started (or not saved yet) the board keeps its own version.
+    var keep = Object.assign({}, S.touched || {}, S.dirty, S.deleted, S.inflight || {}), old = S.tasks;
+    S.touched = null;
     S.tasks = {};
     d.tasks.forEach(function (t) { S.tasks[t.id] = t; });
+    Object.keys(keep).forEach(function (id) { if (old[id]) S.tasks[id] = old[id]; else delete S.tasks[id]; });
     var prevToday = S.today;
     S.arrivals = d.arrivals; S.settings = d.settings; S.today = d.today; S.lastRun = d.lastRun;
     if (!S.date) S.date = d.today;
@@ -184,7 +190,7 @@ function load(fresh) {
     applyLook();
     setSave('');
     render();   // render() opens the morning review card if it hasn't been shown today (maybeCard)
-  }).withFailureHandler(function (e) { setSave('Couldn\'t load: ' + e.message, true); })[fn]();
+  }).withFailureHandler(function (e) { S.touched = null; setSave('Couldn\'t load: ' + e.message, true); })[fn]();
 }
 // Loads the Done archive once (for Stats and search), then runs cb.
 function loadArchive(cb) {
@@ -205,11 +211,12 @@ function flush() {
   if (!ids.length && !del.length) return;
   var rows = ids.filter(function (id) { return S.tasks[id]; }).map(function (id) { return S.tasks[id]; });
   S.dirty = {}; S.deleted = {}; S.saving = true; setSave('Saving…');
+  S.inflight = {}; ids.concat(del).forEach(function (id) { S.inflight[id] = true; });
   google.script.run.withSuccessHandler(function (r) {
-    S.saving = false;
+    S.saving = false; S.inflight = {};
     setSave(r.skipped && r.skipped.length ? 'Saved (' + r.skipped.length + ' changed elsewhere, reload)' : 'Saved');
   }).withFailureHandler(function (e) {
-    S.saving = false;
+    S.saving = false; S.inflight = {};
     rows.forEach(function (t) { S.dirty[t.id] = true; });
     del.forEach(function (id) { S.deleted[id] = true; });
     setSave('Couldn\'t save, retrying', true);
@@ -245,12 +252,14 @@ function change(list) {
     if (patch === null) {
       [id].concat(descendants(id)).forEach(function (x) {
         if (!S.tasks[x]) return;
+        if (S.touched) S.touched[x] = true;
         entry.push({ id: x, before: Object.assign({}, S.tasks[x]) });
         delete S.tasks[x]; delete S.dirty[x]; S.deleted[x] = true;
       });
       return;
     }
     entry.push({ id: id, before: t ? Object.assign({}, t) : null });
+    if (S.touched) S.touched[id] = true;
     if (!t) { t = S.tasks[id] = blank(); t.id = id; t.created = now; delete S.deleted[id]; }
     Object.keys(patch).forEach(function (k) { t[k] = patch[k] == null ? '' : String(patch[k]); });
     if (patch.state === 'done' && !t.done_at) t.done_at = now;
@@ -289,6 +298,7 @@ function undo() {
   var entry = S.undo.pop(); if (!entry) return;
   var now = nowIso();
   entry.slice().reverse().forEach(function (e) {
+    if (S.touched) S.touched[e.id] = true;
     if (e.before) { S.tasks[e.id] = Object.assign({}, e.before, { updated: now }); S.dirty[e.id] = true; delete S.deleted[e.id]; }
     else { delete S.tasks[e.id]; delete S.dirty[e.id]; S.deleted[e.id] = true; }
   });
@@ -1085,7 +1095,7 @@ function renderSel() {
   bar.hidden = !ids.length && !S.selMode;
   if (bar.hidden) return;
   bar.innerHTML = '<b>' + ids.length + ' selected</b>' + (S.selMode ? '<button class="btn" data-act="selall">Select all</button>' : '') +
-    (ids.length ? '<button class="btn" data-act="bulkmenu" title="Change details for all selected tasks">⋯ Edit all</button>' : '') +
+    (ids.length ? '<button class="btn" data-act="bulkmenu" title="Change details for all selected tasks">⋯ Edit all</button><button class="btn" data-act="bulkcat" title="Move all selected tasks to a category">Category</button>' : '') +
     '<button class="btn" data-act="bulk" data-to="today">Today</button><button class="btn" data-act="bulk" data-to="tomorrow">Tomorrow</button>' +
     '<button class="btn" data-act="bulk" data-to="mon">Next Monday</button><button class="btn" data-act="bulk" data-to="week">+1 week</button>' +
     '<button class="btn" data-act="bulk" data-to="sat">Saturday</button><button class="btn" data-act="bulk" data-to="">No date</button>' +
@@ -1218,6 +1228,43 @@ function openBulkMenu(ids, anchor) {
   m.style.top = fitTop(m, r) + 'px';
   m.style.left = Math.max(8, Math.min(window.scrollX + r.right - 300, document.documentElement.clientWidth - 310)) + 'px';
 }
+// Category picker for the selection bar: every category in every list ("Main › PhD › PhD admin"), with a filter box.
+function catPath(c) { var names = [], p = c, g = 0; while (p && g++ < 10) { names.unshift(p.text); p = S.tasks[p.parent]; } return names.join(' › '); }
+function openCatPicker(ids, anchor) {
+  closeMenu(); if (!ids.length) return;
+  var m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
+  m.innerHTML = '<b>Move ' + ids.length + ' task' + (ids.length > 1 ? 's' : '') + ' to</b>' +
+    '<input id="c_find" placeholder="Filter categories" autocomplete="off">' +
+    '<div class="catpick">' + Object.keys(LISTS).map(function (l) {
+      return categories(l).map(function (c) { var path = esc(LISTS[l]) + ' › ' + esc(catPath(c.t)); return '<button class="catopt" data-mact="catpick" data-cat="' + c.t.id + '" data-q="' + path.toLowerCase() + '">' + path + '</button>'; }).join('');
+    }).join('') + '</div>' +
+    '<div class="row"><button class="linkbtn" data-mact="close">Close</button></div>';
+  document.body.appendChild(m);
+  m.dataset.bulk = ids.join(',');
+  var r = anchor.getBoundingClientRect();
+  m.style.top = fitTop(m, r) + 'px';
+  m.style.left = Math.max(8, Math.min(window.scrollX + r.left, document.documentElement.clientWidth - 310)) + 'px';
+  $('c_find').addEventListener('input', function () {
+    var q = this.value.trim().toLowerCase();
+    Array.prototype.forEach.call(m.querySelectorAll('.catopt'), function (b) { b.hidden = !!q && b.dataset.q.indexOf(q) === -1; });
+  });
+  $('c_find').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { var first = m.querySelector('.catopt:not([hidden])'); if (first) first.click(); e.preventDefault(); }
+  });
+  if (!matchMedia('(pointer: coarse)').matches) $('c_find').focus();
+}
+function catPickSave(cat) {
+  var m = $('menu'); if (!m || !m.dataset.bulk || !S.tasks[cat]) return;
+  var ids = m.dataset.bulk.split(',').filter(function (x) { return S.tasks[x]; }), list = S.tasks[cat].list;
+  var changes = ids.filter(function (id) { var t = S.tasks[id]; return topOrParent(t) !== cat || t.list !== list; })
+    .map(function (id) { return [id, { parent: cat, list: list, pos: String(Date.now()) }]; });
+  var extra = [];
+  changes.forEach(function (c) { if (S.tasks[c[0]].list !== list) descendants(c[0]).forEach(function (d) { extra.push([d, { list: list }]); }); });
+  if (changes.length) change(changes.concat(extra));
+  closeMenu();
+  if (S.selMode) endSelMode(); else { S.sel = {}; render(); }
+  toast(changes.length ? 'Moved ' + changes.length + ' to ' + S.tasks[cat].text : 'Already there');
+}
 function bulkSave() {
   var m = $('menu'); if (!m || !m.dataset.bulk) return;
   var ids = m.dataset.bulk.split(',').filter(function (x) { return S.tasks[x]; }), init = JSON.parse(m.dataset.init);
@@ -1303,6 +1350,8 @@ function parseQuick(text) {
   var cats = categories('main').concat(categories('weekend')).concat(categories('ideas'));
   for (var i = 0; i < words.length; i++) {
     var w = words[i], lw = w.toLowerCase();
+    // "\tomorrow": a backslash keeps the word as plain text (the backslash itself is removed)
+    if (w.charAt(0) === '\\' && w.length > 1) { o.text.push(w.slice(1)); continue; }
     if (lw === 'else' || lw === ',else') { elseNext = true; continue; }
     // a day word followed by a comma ("tue,") still counts as a day word
     if (/^(today|tomorrow|mon|tue|wed|thu|fri|sat|sun)[a-z]*,$|^\d{1,2}[\/.]\d{1,2}([\/.]\d{2,4})?,$/.test(lw)) { w = w.slice(0, -1); lw = lw.slice(0, -1); }
@@ -1449,6 +1498,7 @@ document.addEventListener('click', function (e) {
   if (el.dataset.mact && menu) {
     var id0 = menu.dataset.id, a = el.dataset.mact;
     if (a === 'bulksave') { bulkSave(); return; }
+    if (a === 'catpick') { catPickSave(el.dataset.cat); return; }
     if (a === 'save') menuSave(id0);
     if (a === 'close') closeMenu();
     if (a === 'del') {
@@ -1550,6 +1600,7 @@ document.addEventListener('click', function (e) {
   }
   else if (act === 'clearsel') { if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
   else if (act === 'selall') selectAllShown();
+  else if (act === 'bulkcat') openCatPicker(Object.keys(S.sel).filter(function (x) { return S.tasks[x]; }), el);
   else if (act === 'bulkmenu') openBulkMenu(Object.keys(S.sel).filter(function (x) { return S.tasks[x]; }), el);
   else if (act === 'sugg') { var q = $('qa'); q.value = q.value.replace(/#[^\s#]*$/, '#' + el.dataset.v.replace(/\s+/g, '-') + ' '); q.focus(); renderSugg(''); }
   else if (act === 'hit') {
