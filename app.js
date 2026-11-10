@@ -899,7 +899,11 @@ function listView() {
     '<button class="btn" data-act="foldall">Fold all</button><button class="btn" data-act="openall">Open all</button>' +
     '<button class="btn' + (S.plan ? ' pri' : '') + '" data-act="plan">' + (S.plan ? 'Close plan mode' : 'Plan the week') + '</button></div>';
   (function walk(parent, depth, level) {
-    sortedKids(S.list, parent).forEach(function (t) {
+    // A category's own tasks and labels come first, right under its heading; its subcategories after them
+    // (otherwise the own tasks were drawn below the last subcategory and looked like they belonged to it).
+    var items = sortedKids(S.list, parent);
+    items = items.filter(function (t) { return t.kind !== 'category'; }).concat(items.filter(function (t) { return t.kind === 'category'; }));
+    items.forEach(function (t) {
       if (t.kind === 'category') {
         var open = openCount(t.id);
         html += '<div class="cat d' + Math.min(depth, 3) + (folded[t.id] ? ' folded' : '') + '" id="c_' + t.id + '" data-drop="cat" data-cat="' + t.id + '"' + ccStyle(catColor(t)) + '>' +
