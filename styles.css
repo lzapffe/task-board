@@ -349,6 +349,15 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 .plancol { position: sticky; top: calc(var(--toph, 58px) + 8px); display: grid; gap: 8px; }
 .planhead { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 0.9rem; }
 .plancols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.rpcols { grid-template-columns: repeat(var(--n, 5), minmax(0, 1fr)); }
+.replan .rptitle { margin-right: auto; font-size: 0.9rem; }
+.replan .rpnote { margin: 4px 0 10px; font-size: 0.8rem; color: var(--muted); }
+.replan .rpnote b { color: var(--ink); }
+.replan .rpmust { border: 1px solid var(--must); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
+.replan .rpmust h4 { margin: 0 0 4px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--must); }
+.replan .rpcat { font-weight: 700; padding: 4px 0; display: inline-block; }
+.replan .task.placed { opacity: 0.5; }
+.rpbtn { font-size: 0.8rem; padding: 3px 9px; }
 .pcol { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-height: 220px; max-height: calc(100vh - 250px); overflow: auto; display: grid; gap: 4px; align-content: start; }
 .pcol.today { border-color: var(--accent); }
 .pcol h3 { margin: 0 0 4px; font-size: 0.8rem; font-weight: 800; display: grid; cursor: pointer; }

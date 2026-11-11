@@ -397,6 +397,7 @@ function renderTop() {
   if (S.view === 'day') { title = longDate(S.date); sub = 'Week ' + isoWeek(S.date) + (S.date === S.today ? ' · Today' : ''); }
   else if (S.view === 'week') { title = 'Week ' + isoWeek(S.date); sub = shortDate(mondayOf(S.date)) + ' – ' + shortDate(addDays(mondayOf(S.date), 6)); }
   else if (S.view === 'weekend') { var sat = weekendSat(); title = 'Weekend ' + pd(sat).getUTCDate() + '–' + longDate(addDays(sat, 1)).split(' ').slice(1).join(' '); sub = 'Week ' + isoWeek(sat); }
+  else if (S.view === 'lists' && S.replan) { title = 'Replan: ' + LISTS[S.list]; sub = 'Week ' + isoWeek(S.today) + ' · the rest of the week'; }
   else if (S.view === 'lists') { title = LISTS[S.list]; sub = 'Drag tasks onto a day on the right'; }
   else if (S.view === 'categories') { title = 'Categories'; sub = 'Status and what moved'; }
   else if (S.view === 'stats') { title = 'Stats'; sub = 'What you got done'; }
@@ -413,7 +414,7 @@ function renderTop() {
     (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') + '</div>' +
     '<nav class="tabs">' + views.map(function (v) { return '<button data-act="view" data-v="' + v[0] + '" data-drop="tab" class="' + (S.view === v[0] ? 'on' : '') + '"' + (v[0] === 'settings' ? ' aria-label="Settings"' : '') + '>' + v[1] + '</button>'; }).join('') + '</nav>' +
     '<div class="tools"><button class="wk" data-act="view" data-v="stats" title="Tasks done since Monday">✓ <b>' + wkDone + '</b> this week</button>' + (S.view === 'day' ? '<div class="prog"><span>' + done + ' of ' + todays.length + ' done</span><div class="bar"><i style="width:' + (todays.length ? done / todays.length * 100 : 0) + '%"></i></div></div>' : '') +
-    (S.view === 'day' ? '<button class="iconbtn" data-act="print" aria-label="Print" title="Print (A4)">⎙</button>' : '') +
+    (S.view === 'day' ? '<button class="btn rpbtn" data-act="replan" title="Plan the rest of this week again">Replan week</button><button class="iconbtn" data-act="print" aria-label="Print" title="Print (A4)">⎙</button>' : '') +
     '<button class="iconbtn" data-act="reload" aria-label="Reload" title="Reload from the sheet">↻</button>' +
     '<input class="search" id="search" placeholder="Search all lists  /" autocomplete="off">' +
     '<span class="savestate" id="savestate"></span></div>';
@@ -757,7 +758,11 @@ function renderTriage() {
 function bumpedNote() {
   var b = all().filter(function (t) { return isTask(t) && t.bumped_on === S.today && t.state !== 'done' && t.bumped_from; });
   if (!b.length) return '';
-  return '<div class="bknote">Moved to their backup day instead of carried over: ' + b.map(function (t) { return '<b>' + esc(t.text) + '</b> (' + esc(shortDate(t.bumped_from)) + ' → ' + esc(shortDate(t.day)) + ')'; }).join(', ') + '</div>';
+  // OK hides it for the rest of the day (saved in Settings, so on every device); a task moved later that day brings it back.
+  var ok = String(S.settings.bknote_ok || '').split('|');
+  if (ok[0] === S.today && b.every(function (t) { return ok.indexOf(t.id) !== -1; })) return '';
+  return '<div class="bknote">Moved to their backup day instead of carried over: ' + b.map(function (t) { return '<b>' + esc(t.text) + '</b> (' + esc(shortDate(t.bumped_from)) + ' → ' + esc(shortDate(t.day)) + ')'; }).join(', ') +
+    ' <button class="linkbtn" data-act="bkok" data-ids="' + b.map(function (t) { return t.id; }).join('|') + '">OK</button></div>';
 }
 // The last working day: yesterday, or Friday when today is Saturday, Sunday or Monday.
 function prevWorkday() { var w = dow(S.today); return addDays(S.today, w === 6 ? -1 : w === 0 ? -2 : w === 1 ? -3 : -1); }
@@ -901,13 +906,90 @@ function wkDrop(ids, tgt, below) {
   S.sel = {}; render();
 }
 
+// ---- Replan the rest of the week -----------------------------------------------
+// The Lists view filtered to one list's unfinished tasks on today or a later day this week (and older
+// ones waiting to be carried over), with a column for each day left. "Clear and start over" takes them
+// all off their days (fixed-time tasks stay); you drag back what fits. Leftovers keep no date.
+function weekEndDay() { var w = dow(S.today); return addDays(S.today, w === 0 ? 0 : 7 - w); }
+function inReplan(t) {
+  if (!t || !isTask(t) || t.state === 'done' || t.work_of || t.list !== S.list) return false;
+  if (S.replanPool && S.replanPool[t.id]) return true;
+  var end = weekEndDay();
+  if (t.day && t.day <= end) return true;
+  return backups(t).some(function (b) { return b >= S.today && b <= end; });
+}
+function replanClear() {
+  var end = weekEndDay();
+  var ids = all().filter(function (t) { return inReplan(t) && t.day && t.day <= end && !t.time; }).map(function (t) { return t.id; });
+  if (!ids.length) { toast('Nothing to clear'); return; }
+  if (!confirm('Take ' + ids.length + ' task' + (ids.length > 1 ? 's' : '') + ' off their days so you can plan the rest of the week again?\nFixed-time tasks stay. Ctrl+Z undoes it.')) return;
+  ids.forEach(function (id) { S.replanPool[id] = true; });
+  change(ids.map(function (id) { return [id, { day: '', carried: '', backup_days: '', span: '' }]; }));
+  toast('Cleared ' + ids.length + ': drag back what fits');
+}
+function replanView() {
+  var hasMatch = function (id) { return descendants(id).some(function (x) { var t = S.tasks[x]; return inReplan(t) && !t.must; }); };
+  var row = function (t, lv) { return taskRow(t, lv, { showDay: true, showNote: false }).replace('class="task ', 'class="task ' + (t.day >= S.today ? 'placed ' : 'unplaced ')); };
+  var mine = all().filter(inReplan);
+  var left = mine.filter(function (t) { return !(t.day >= S.today); }).length;
+  var html = '<div class="listwrap plan replan"><div>';
+  html += '<div class="listbar"><b class="rptitle">Replan the rest of the week</b><button class="btn" data-act="replanclear" title="Take this list\'s tasks off their days (fixed times stay)">Clear and start over</button>' +
+    '<button class="btn pri" data-act="replanclose">Done</button></div>';
+  html += '<p class="rpnote">' + mine.length + ' task' + (mine.length === 1 ? '' : 's') + ' in ' + esc(LISTS[S.list]) + (left ? ' · <b>' + left + ' without a day</b>' : '') + '. Placed ones are dimmed. What you leave without a day stays in the list.</p>';
+  var musts = mine.filter(function (t) { return t.must; });
+  if (musts.length) html += '<div class="rpmust"><h4>Must do · place these first</h4><ul class="tasks">' + musts.map(function (t) { return row(t, 0); }).join('') + '</ul></div>';
+  (function walk(parent, depth, level) {
+    var items = sortedKids(S.list, parent);
+    items = items.filter(function (t) { return t.kind !== 'category'; }).concat(items.filter(function (t) { return t.kind === 'category'; }));
+    items.forEach(function (t) {
+      if (t.kind === 'category') {
+        if (!hasMatch(t.id)) return;
+        html += '<div class="cat d' + Math.min(depth, 3) + '" data-drop="cat" data-cat="' + t.id + '"' + ccStyle(catColor(t)) + '><div class="bh"><span class="rpcat">' + esc(t.text) + '</span></div><ul class="tasks">';
+        walk(t.id, depth + 1, 0);
+        html += '</ul></div>';
+      } else if (t.kind === 'header') {
+        if (hasMatch(t.id)) { html += '<li class="hdr">' + esc(t.text) + '</li>'; walk(t.id, depth, level); }
+      } else if (t.kind === 'task') {
+        if (inReplan(t) && !t.must) html += row(t, level);
+        walk(t.id, depth, level + 1);
+      }
+    });
+  })('', 0, 0);
+  if (!mine.length) html += '<div class="empty">No unfinished tasks in this list for the rest of the week.</div>';
+  html += '</div>' + replanColumns() + '</div>';
+  return html;
+}
+function replanColumns() {
+  var w = dow(S.today), days = [], d = S.today, end = weekEndDay();
+  var weekday = w >= 1 && w <= 5;
+  while (d <= (weekday ? addDays(S.today, 5 - w) : end)) { days.push(d); d = addDays(d, 1); }
+  var cols = days.map(function (d) { return { day: d, kind: 'day', title: shortDate(d), days: [d] }; });
+  if (weekday) cols.push({ day: addDays(S.today, 6 - w), kind: 'weekend', title: 'Weekend', days: [addDays(S.today, 6 - w), end] });
+  var html = '<div class="plancol"><div class="planhead"><b>Week ' + isoWeek(S.today) + ' · the days left</b></div><div class="plancols rpcols" style="--n:' + cols.length + '">';
+  cols.forEach(function (c) {
+    var on = function (t) { return c.days.some(function (x) { return onDay(t, x); }); };
+    var ts = all().filter(function (t) { return t.state !== 'done' && on(t) && ((isTask(t) && t.list === S.list) || t.time || t.kind === 'event'); })
+      .sort(function (a, b) { return (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time < b.time ? -1 : a.time > b.time ? 1 : 0) || (a.must ? 0 : 1) - (b.must ? 0 : 1); });
+    var other = all().filter(function (t) { return isTask(t) && t.state !== 'done' && on(t) && t.list !== S.list && !t.time; }).length;
+    var n = ts.filter(function (t) { return isTask(t) && !t.time; }).length, musts = ts.filter(function (t) { return t.must; }).length;
+    html += '<div class="pcol' + (c.day === S.today ? ' today' : '') + '" data-drop="' + c.kind + '" data-day="' + c.day + '"><h3' + (c.kind === 'day' ? ' data-act="goday" data-d="' + c.day + '"' : '') + '>' + c.title + '<em>' + n + ' task' + (n === 1 ? '' : 's') + (musts ? ' · ' + musts + ' must' : '') + (other ? ' · +' + other + ' other list' + (other > 1 ? 's' : '') : '') + '</em></h3>' +
+      ts.map(function (t) {
+        var fixed = !!t.time || t.kind === 'event', bk = c.days.indexOf(t.day) === -1, n2 = colorOf(t);
+        return '<div class="wt' + (t.must ? ' must' : '') + (fixed ? ' ev' : '') + (bk ? ' bk' : '') + '" draggable="' + (bk || fixed ? 'false' : 'true') + '" data-id="' + t.id + '" data-act="menu"' + (n2 ? ' style="border-left:3px solid var(--t' + n2 + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + (bk ? ' (backup)' : '') + '</div>';
+      }).join('') + '</div>';
+  });
+  return html + '</div><div class="planextra"><div class="dbox" data-drop="day" data-day="' + addDays(end, 1) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div></div>';
+}
+
 // ---- Lists view (outline on the left, day boxes on the right) -----------------------
 function listView() {
+  if (S.replan) return replanView();
   var folded = json(store('folded'), {}) || {};
   var html = '<div class="listwrap' + (S.plan ? ' plan' : '') + '"><div>';
   html += '<div class="listbar"><button class="btn" data-act="addcat" data-p="">+ Category</button><button class="btn" data-act="toggledone">' + (S.showDone ? 'Hide done' : 'Show done') + '</button>' +
     '<button class="btn" data-act="foldall">Fold all</button><button class="btn" data-act="openall">Open all</button>' +
-    '<button class="btn' + (S.plan ? ' pri' : '') + '" data-act="plan">' + (S.plan ? 'Close plan mode' : 'Plan the week') + '</button></div>';
+    '<button class="btn' + (S.plan ? ' pri' : '') + '" data-act="plan">' + (S.plan ? 'Close plan mode' : 'Plan the week') + '</button>' +
+    '<button class="btn" data-act="replan" title="Only this list\'s tasks for the rest of this week, with the days left">Replan week</button></div>';
   (function walk(parent, depth, level) {
     // A category's own tasks and labels come first, right under its heading; its subcategories after them
     // (otherwise the own tasks were drawn below the last subcategory and looked like they belonged to it).
@@ -1548,7 +1630,11 @@ document.addEventListener('click', function (e) {
   else if (act === 'edit') { if (e.ctrlKey || e.metaKey) { toggleSel(id); return; } if (e.shiftKey) { rangeSel(id); return; } }
   else if (act === 'guidance') { saveSetting('guidance', guide() ? 'off' : 'on'); render(); }
   else if (act === 'bo') { moveStdBlock(id, Number(el.dataset.dir)); }
-  else if (act === 'view') { S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.date || S.today; render(); }
+  else if (act === 'bkok') { saveSetting('bknote_ok', S.today + '|' + el.dataset.ids); if (S.triage) renderTriage(); render(); }
+  else if (act === 'replan') { S.list = S.view === 'lists' ? S.list : 'main'; S.view = 'lists'; S.replan = true; S.plan = false; S.replanPool = {}; render(); window.scrollTo(0, 0); }
+  else if (act === 'replanclose') { S.replan = false; S.replanPool = {}; render(); }
+  else if (act === 'replanclear') replanClear();
+  else if (act === 'view') { S.replan = false; S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.date || S.today; render(); }
   else if (act === 'prev' || act === 'next') { var step = S.view === 'day' ? 1 : 7; S.date = addDays(S.date, act === 'prev' ? -step : step); render(); }
   else if (act === 'goday') { S.date = el.dataset.d; S.view = 'day'; render(); }
   else if (act === 'weekend') { S.view = 'weekend'; render(); }
@@ -1732,7 +1818,7 @@ document.addEventListener('drop', function (e) {
   if ((kind === 'day' || kind === 'weekend') && tgt.dataset.day && !S.triage) {
     var bday = tgt.dataset.day;
     if (e.ctrlKey || e.metaKey) { addBackup(ids, bday); S.sel = {}; toast(shortDate(bday) + ' added as a backup day'); return; }
-    if (S.view === 'lists' && kind === 'day' && ids.every(function (id) { var x = S.tasks[id]; return x && isTask(x) && x.state !== 'done' && x.day && x.day >= S.today && bday > x.day; })) {
+    if (S.view === 'lists' && !S.replan && kind === 'day' && ids.every(function (id) { var x = S.tasks[id]; return x && isTask(x) && x.state !== 'done' && x.day && x.day >= S.today && bday > x.day; })) {
       addBackup(ids, bday); S.sel = {};
       actionToast(shortDate(bday) + ' added as backup day', 'Move instead', function () { undo(); moveTo(ids, bday, { span: '' }); });
       return;
