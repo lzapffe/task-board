@@ -144,6 +144,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dbox b em { font-style: normal; color: var(--faint); font-weight: 600; }
 .dbox span { color: var(--muted); font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dbox.today { border-color: var(--accent); }
+.dbox span.m { color: var(--must); }
 .dbox.over, .wcol.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 /* ---- Week and weekend views ---- */

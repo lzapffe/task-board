@@ -436,7 +436,7 @@ function renderTray() {
     (a.length > 3 ? ' <button class="linkbtn" data-act="tray" style="margin-left:auto">' + (S.trayOpen ? 'Show fewer ▴' : 'Show all ▾') + '</button>' : '') + '</div>' +
     shown.map(function (x) {
       return '<div class="arr"><span>' + esc(x.text) + '</span><span class="src">' + esc(x.source) + ' · ' + esc(x.date ? shortDate(x.date) : '') + '</span>' +
-        '<span class="btns"><button class="btn pri" data-act="arrtask" data-id="' + esc(x.id) + '">Make task</button><button class="btn" data-act="arrseen" data-id="' + esc(x.id) + '">Seen</button></span></div>';
+        '<span class="btns"><button class="btn pri" data-act="arrtask" data-id="' + esc(x.id) + '">Make task</button><button class="btn" data-act="arrseen" data-id="' + esc(x.id) + '">OK</button></span></div>';
     }).join('');
 }
 function renderSide() {
@@ -932,7 +932,7 @@ function replanView() {
   var row = function (t, lv) { return taskRow(t, lv, { showDay: true, showNote: false }).replace('class="task ', 'class="task ' + (t.day >= S.today ? 'placed ' : 'unplaced ')); };
   var mine = all().filter(inReplan);
   var left = mine.filter(function (t) { return !(t.day >= S.today); }).length;
-  var html = '<div class="listwrap plan replan"><div>';
+  var html = '<div class="listwrap replan"><div>';
   html += '<div class="listbar"><b class="rptitle">Replan the rest of the week</b><button class="btn" data-act="replanclear" title="Take this list\'s tasks off their days (fixed times stay)">Clear and start over</button>' +
     '<button class="btn pri" data-act="replanclose">Done</button></div>';
   html += '<p class="rpnote">' + mine.length + ' task' + (mine.length === 1 ? '' : 's') + ' in ' + esc(LISTS[S.list]) + (left ? ' · <b>' + left + ' without a day</b>' : '') + '. Placed ones are dimmed. What you leave without a day stays in the list.</p>';
@@ -959,26 +959,25 @@ function replanView() {
   html += '</div>' + replanColumns() + '</div>';
   return html;
 }
+// Same narrow column of day boxes as the normal Lists view, but only the days left this week.
 function replanColumns() {
   var w = dow(S.today), days = [], d = S.today, end = weekEndDay();
   var weekday = w >= 1 && w <= 5;
   while (d <= (weekday ? addDays(S.today, 5 - w) : end)) { days.push(d); d = addDays(d, 1); }
   var cols = days.map(function (d) { return { day: d, kind: 'day', title: shortDate(d), days: [d] }; });
   if (weekday) cols.push({ day: addDays(S.today, 6 - w), kind: 'weekend', title: 'Weekend', days: [addDays(S.today, 6 - w), end] });
-  var html = '<div class="plancol"><div class="planhead"><b>Week ' + isoWeek(S.today) + ' · the days left</b></div><div class="plancols rpcols" style="--n:' + cols.length + '">';
+  var html = '<div class="dropcol"><h4>Drop on a day</h4>';
   cols.forEach(function (c) {
     var on = function (t) { return c.days.some(function (x) { return onDay(t, x); }); };
+    // This list's tasks, plus fixed times from every list (they take up the day too)
     var ts = all().filter(function (t) { return t.state !== 'done' && on(t) && ((isTask(t) && t.list === S.list) || t.time || t.kind === 'event'); })
       .sort(function (a, b) { return (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time < b.time ? -1 : a.time > b.time ? 1 : 0) || (a.must ? 0 : 1) - (b.must ? 0 : 1); });
-    var other = all().filter(function (t) { return isTask(t) && t.state !== 'done' && on(t) && t.list !== S.list && !t.time; }).length;
-    var n = ts.filter(function (t) { return isTask(t) && !t.time; }).length, musts = ts.filter(function (t) { return t.must; }).length;
-    html += '<div class="pcol' + (c.day === S.today ? ' today' : '') + '" data-drop="' + c.kind + '" data-day="' + c.day + '"><h3' + (c.kind === 'day' ? ' data-act="goday" data-d="' + c.day + '"' : '') + '>' + c.title + '<em>' + n + ' task' + (n === 1 ? '' : 's') + (musts ? ' · ' + musts + ' must' : '') + (other ? ' · +' + other + ' other list' + (other > 1 ? 's' : '') : '') + '</em></h3>' +
-      ts.map(function (t) {
-        var fixed = !!t.time || t.kind === 'event', bk = c.days.indexOf(t.day) === -1, n2 = colorOf(t);
-        return '<div class="wt' + (t.must ? ' must' : '') + (fixed ? ' ev' : '') + (bk ? ' bk' : '') + '" draggable="' + (bk || fixed ? 'false' : 'true') + '" data-id="' + t.id + '" data-act="menu"' + (n2 ? ' style="border-left:3px solid var(--t' + n2 + 't)"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + (bk ? ' (backup)' : '') + '</div>';
-      }).join('') + '</div>';
+    var n = ts.filter(function (t) { return isTask(t) && !t.time; }).length;
+    html += '<div class="dbox' + (c.day === S.today ? ' today' : '') + '" data-drop="' + c.kind + '" data-day="' + c.day + '"><b>' + c.title + '<em>' + n + '</em></b>' +
+      ts.slice(0, 3).map(function (t) { return '<span' + (t.must ? ' class="m"' : '') + '>' + (t.time ? timeText(t.time) + ' ' : '') + esc(t.text) + '</span>'; }).join('') +
+      (ts.length > 3 ? '<span>+' + (ts.length - 3) + ' more</span>' : '') + '</div>';
   });
-  return html + '</div><div class="planextra"><div class="dbox" data-drop="day" data-day="' + addDays(end, 1) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div></div>';
+  return html + '<div class="dbox" data-drop="day" data-day="' + addDays(end, 1) + '"><b>Next Monday<em></em></b></div><div class="dbox" data-drop="day" data-day=""><b>No date<em></em></b></div></div>';
 }
 
 // ---- Lists view (outline on the left, day boxes on the right) -----------------------
