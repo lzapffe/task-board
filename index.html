@@ -1,77 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="no">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Task board</title>
-<!-- Safety: only load code from this site, only talk to Google Apps Script, fonts from Google Fonts. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
-<meta name="referrer" content="no-referrer">
-<meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#0E1630">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css?v=rev2q">
-<link rel="stylesheet" href="connect.css?v=rev2q">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Security: scripts and styles only from this site (and fonts from Google Fonts);
+       data only to Google Apps Script. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://script.google.com https://script.googleusercontent.com; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#23402F">
+  <title>SPARK-tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css?v=19">
 </head>
 <body>
-<div class="app" id="app">
-  <div class="top" id="top"></div>
-  <div class="banner" id="banner" hidden></div>
-  <div class="tray" id="tray" hidden></div>
-  <aside class="side" id="side"></aside>
-  <main class="main" id="main"><div class="loading">Loading your tasks…</div></main>
-  <div class="add" id="add">
-    <div class="selbar" id="selbar" hidden></div>
-    <div class="sugg" id="sugg"></div>
-    <div class="addrow">
-      <label for="qa">+</label>
-      <input id="qa" autocomplete="off" placeholder="Add a task. Enter puts it on the day you're looking at. Words: tomorrow, fri, 09:15, ! (must), due 15/11, #tag or #category">
-      <span class="qacat" id="qacat" title="Where a task without a #category goes: the last category you used"></span>
-      <details class="help"><summary class="q" aria-label="How to write a quick task" title="How to write a quick task">?</summary>
-        <span class="pop"><b>Quick add: type a task, then press Enter</b>
-          <table>
-            <tr><td><code>!</code></td><td>must do</td></tr>
-            <tr><td><code>14:00</code></td><td>fixed time (shows under Fixed times)</td></tr>
-            <tr><td><code>today</code> <code>tomorrow</code></td><td>which day</td></tr>
-            <tr><td><code>mon</code> … <code>sun</code></td><td>the next one of that weekday</td></tr>
-            <tr><td><code>nodate</code></td><td>no day (stays in the list)</td></tr>
-            <tr><td><code>on 20/11</code></td><td>a specific day (also 20/11/2026)</td></tr>
-            <tr><td><code>due 15/11</code></td><td>deadline</td></tr>
-            <tr><td><code>#Category</code></td><td>put it in a category (suggestions appear)</td></tr>
-            <tr><td><code>#tag</code></td><td>a tag (any word that isn't a category)</td></tr>
-            <tr><td><code>~</code></td><td>if time (grey, last in its block)</td></tr>
-            <tr><td><code>\tomorrow</code></td><td>a backslash keeps the word as plain text (no date, time, tag…)</td></tr>
-          </table>
-          Example: <code>Email supervisor tomorrow 10:00 ! #Research</code>
-          <p>Without a day word, the task goes on the day you're looking at. In the Lists view it gets no day. Without a #category it goes to the last category you used (shown next to the box).</p>
-          <div class="keys" id="kbdhelp"></div>
-        </span></details>
-    </div>
+  <!-- Connect screen: shown until the web app link and key are saved on this device. -->
+  <div id="connect" class="connect" hidden>
+    <form id="connectForm" class="connect-box">
+      <h1>SPARK-tracker</h1>
+      <p>Koble til regnearket ditt. Lenken og nøkkelen lagres bare i denne nettleseren.</p>
+      <label for="cUrl">Lenke til nettappen (slutter på /exec)</label>
+      <input id="cUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+      <label for="cKey">Appnøkkel</label>
+      <input id="cKey" type="password" autocomplete="off" spellcheck="false">
+      <p id="cErr" class="err" hidden></p>
+      <button type="submit" class="btn primary">Koble til</button>
+    </form>
   </div>
-</div>
 
+  <!-- The app: side panel + main area. -->
+  <div id="shell" class="shell" hidden>
+    <nav id="side" class="side" aria-label="Sider"></nav>
+    <main id="main" class="main" tabindex="-1"></main>
+  </div>
 
-<!-- Shown the first time on a device (or after "Forget"): where to connect and the key. -->
-<div class="connect" id="connect" hidden>
-  <form class="connect-box" id="connectForm" autocomplete="off">
-    <h1>Task board</h1>
-    <p>Connect this device to your Assistant hub. You only do this once per device.</p>
-    <label for="cUrl">Hub web link (ends in /exec)</label>
-    <input id="cUrl" type="url" required spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec">
-    <label for="cKey">App key</label>
-    <input id="cKey" type="password" required spellcheck="false" placeholder="64 letters and numbers">
-    <p class="connect-err" id="cErr" hidden></p>
-    <button type="submit" class="btn">Connect</button>
-    <p class="connect-note">The link and key are saved only in this browser on this device.</p>
-  </form>
-</div>
+  <!-- Quick capture button (goes to Innboks). -->
+  <button id="fab" class="fab" type="button" aria-label="Hurtignotat" hidden>+</button>
 
-<script src="connect.js?v=rev2q"></script>
-<script src="app.js?v=rev2q"></script>
+  <!-- Side drawer for editing one item. -->
+  <div id="drawerBg" class="drawer-bg" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-modal="true" role="dialog"></aside>
+
+  <!-- Short messages ("Lagret"). -->
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="app.js?v=19"></script>
 </body>
 </html>
