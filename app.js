@@ -483,10 +483,8 @@ function renderTop() {
   var wkDone = all().filter(function (t) { return isTask(t) && t.state === 'done' && String(t.done_at).slice(0, 10) >= wkStart; }).length;
   $('top').innerHTML =
     '<div class="day">' + (arrows ? '<button class="iconbtn" data-act="prev" aria-label="Back">‹</button>' : '') +
-    (arrows ? '<button class="jumpbtn" data-act="jump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + ' ▾</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
-    (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') +
-    // Away from today (another day, or another week in Week/Weekend): a quick way back
-    (arrows && (S.view === 'day' ? S.date !== S.today : mondayOf(S.date) !== mondayOf(S.today)) ? '<button class="linkbtn backtoday" data-act="gotoday">Back to today</button>' : '') + '</div>' +
+    (arrows ? '<button class="jumpbtn" data-act="jump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
+    (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') + '</div>' +
     '<nav class="tabs">' + views.map(function (v) { return '<button data-act="view" data-v="' + v[0] + '" data-drop="tab" class="' + (S.view === v[0] ? 'on' : '') + '"' + (v[0] === 'settings' ? ' aria-label="Settings"' : '') + '>' + v[1] + '</button>'; }).join('') + '</nav>' +
     '<div class="tools"><button class="wk" data-act="view" data-v="stats" title="Tasks done since Monday">✓ <b>' + wkDone + '</b> this week</button>' + (S.view === 'day' ? '<div class="prog"><span>' + done + ' of ' + todays.length + ' done</span><div class="bar"><i style="width:' + (todays.length ? done / todays.length * 100 : 0) + '%"></i></div></div>' : '') +
     (S.view === 'day' ? '<button class="btn rpbtn" data-act="replan" title="Plan the rest of this week again">Replan week</button><button class="iconbtn" data-act="print" aria-label="Print" title="Print (A4)">⎙</button>' : '') +

@@ -216,7 +216,6 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); ou
 .calpop .row { display: flex; gap: 5px; margin-top: 6px; }
 .jumpbtn { background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .jumpbtn:hover h1 { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-.backtoday { white-space: nowrap; font-size: 0.78rem; }
 .menu { position: absolute; z-index: 50; width: 300px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); padding: 10px; display: grid; gap: 8px; font-size: 0.85rem; }
 .menu .row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .catpick { display: grid; gap: 2px; max-height: 320px; overflow: auto; }
