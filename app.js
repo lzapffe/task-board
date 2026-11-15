@@ -65,6 +65,71 @@ function dow(s) { return pd(s).getUTCDay(); }
 function mondayOf(s) { return addDays(s, -((dow(s) + 6) % 7)); }
 function longDate(s) { var d = pd(s); return DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()]; }
 function shortDate(s) { var d = pd(s); return DAYS[d.getUTCDay()].slice(0, 3) + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()].slice(0, 3); }
+// ---- Dates typed in Norwegian order (dd.mm.yyyy) --------------------------------------
+// ISO (2026-11-15) → 15.11.2026
+function noDate(iso) { return /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' + iso.slice(0, 4) : ''; }
+// What you typed → ISO. Takes 15.11.2026, 15.11.26, 15.11 (this year), 15/11/2026, 15-11-2026, 151126.
+// Empty → '', not a real date → null.
+function parseNo(s) {
+  s = String(s || '').trim(); if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  var m = s.match(/^(\d{1,2})[.\/\- ](\d{1,2})(?:[.\/\- ](\d{2}|\d{4}))?\.?$/) || s.match(/^(\d{2})(\d{2})(\d{2}|\d{4})?$/);
+  if (!m) return null;
+  var d = +m[1], mo = +m[2], y = m[3] ? +m[3] : +S.today.slice(0, 4); if (y < 100) y += 2000;
+  var dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return dt.toISOString().slice(0, 10);
+}
+// A date field: a text box shown as dd.mm.yyyy (a click opens the small calendar).
+function dIn(attrs, iso, ph) { return '<input type="text" class="dfield" inputmode="numeric" autocomplete="off" placeholder="' + (ph || 'dd.mm.yyyy') + '" value="' + esc(noDate(iso)) + '" ' + attrs + '>'; }
+// Reads one date field: '' when empty, ISO when valid, null (red edge + a message) when not.
+function readD(el) {
+  if (typeof el === 'string') el = $(el); if (!el) return '';
+  var r = parseNo(el.value);
+  if (r === null) { el.classList.add('bad'); el.focus(); toast('Write the date as dd.mm.yyyy, e.g. 24.12.2026'); }
+  else el.classList.remove('bad');
+  return r;
+}
+// True (and the first wrong field marked) when a date field inside box isn't a real date.
+function badDates(box) { var bad = false; (box ? box.querySelectorAll('.dfield') : []).forEach(function (f) { if (!bad && readD(f) === null) bad = true; }); return bad; }
+// OK button or Enter in a date field that does something straight away (calendar button, review card, selection bar).
+function dateOk(df) {
+  var iso = readD(df); if (iso === null) return; if (iso === '') { df.focus(); return; }
+  closeCal();
+  var k = df.dataset.ok;
+  if (k === 'dp') { var mm = $('menu'); if (mm) applyDate(mm.dataset.id, mm.dataset.f, iso); }
+  else if (k === 'bulk') { moveTo(Object.keys(S.sel), iso); if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
+  else if (k === 'tg') triageAct('date', iso, df.dataset.tgdate);
+}
+
+// ---- The small calendar (under a date field, or under the week/day heading to jump) ----
+// onPick gets the ISO date; mode 'nav' also makes the week numbers clickable.
+function openCal(anchor, iso, onPick, mode) {
+  closeCal();
+  var c = document.createElement('div'); c.className = 'calpop'; c.id = 'calpop';
+  c._pick = onPick; c._mode = mode || ''; c._sel = iso || ''; c._ym = (iso || S.today).slice(0, 7);
+  document.body.appendChild(c); drawCal(c);
+  var r = anchor.getBoundingClientRect();
+  c.style.top = fitTop(c, r) + 'px';
+  c.style.left = Math.max(8, Math.min(window.scrollX + r.left, document.documentElement.clientWidth - 262)) + 'px';
+}
+function closeCal() { var c = $('calpop'); if (c) c.remove(); }
+function drawCal(c) {
+  var y = +c._ym.slice(0, 4), mo = +c._ym.slice(5, 7), start = mondayOf(c._ym + '-01');
+  var h = '<div class="ch"><button class="iconbtn" data-cal="-1" aria-label="Previous month">‹</button><b>' + MONTHS[mo - 1] + ' ' + y + '</b><button class="iconbtn" data-cal="1" aria-label="Next month">›</button></div>' +
+    '<table><tr><th>Wk</th>' + ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(function (d) { return '<th>' + d + '</th>'; }).join('') + '</tr>';
+  // One row per week until the month ends
+  for (var w = 0; w < 6; w++) {
+    var mon = addDays(start, w * 7); if (w > 0 && mon.slice(0, 7) > c._ym) break;
+    h += '<tr><td class="wn">' + (c._mode === 'nav' ? '<button data-calday="' + mon + '" title="Go to week ' + isoWeek(mon) + '">' + isoWeek(mon) + '</button>' : '<span>' + isoWeek(mon) + '</span>') + '</td>';
+    for (var i = 0; i < 7; i++) {
+      var d = addDays(mon, i), cls = (d.slice(0, 7) !== c._ym ? 'out ' : '') + (d === S.today ? 'today ' : '') + (d === c._sel ? 'on' : '');
+      h += '<td class="' + cls + '"><button data-calday="' + d + '" aria-label="' + esc(longDate(d)) + '">' + (+d.slice(8)) + '</button></td>';
+    }
+    h += '</tr>';
+  }
+  c.innerHTML = h + '</table><div class="row"><button class="btn" data-calday="' + S.today + '">Today</button></div>';
+}
 function isoWeek(s) { var d = pd(s); var n = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - n + 3); var f = new Date(Date.UTC(d.getUTCFullYear(), 0, 4)); return 1 + Math.round(((d - f) / 864e5 - 3 + ((f.getUTCDay() + 6) % 7)) / 7); }
 function nowIso() { var d = new Date(); var p = function (n) { return String(n).padStart(2, '0'); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
 function newId() { return 't' + Date.now().toString(36).slice(-6) + Math.floor(Math.random() * 1296).toString(36); }
@@ -418,8 +483,10 @@ function renderTop() {
   var wkDone = all().filter(function (t) { return isTask(t) && t.state === 'done' && String(t.done_at).slice(0, 10) >= wkStart; }).length;
   $('top').innerHTML =
     '<div class="day">' + (arrows ? '<button class="iconbtn" data-act="prev" aria-label="Back">‹</button>' : '') +
-    '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>' +
-    (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') + '</div>' +
+    (arrows ? '<button class="jumpbtn" data-act="jump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + ' ▾</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
+    (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') +
+    // Away from today (another day, or another week in Week/Weekend): a quick way back
+    (arrows && (S.view === 'day' ? S.date !== S.today : mondayOf(S.date) !== mondayOf(S.today)) ? '<button class="linkbtn backtoday" data-act="gotoday">Back to today</button>' : '') + '</div>' +
     '<nav class="tabs">' + views.map(function (v) { return '<button data-act="view" data-v="' + v[0] + '" data-drop="tab" class="' + (S.view === v[0] ? 'on' : '') + '"' + (v[0] === 'settings' ? ' aria-label="Settings"' : '') + '>' + v[1] + '</button>'; }).join('') + '</nav>' +
     '<div class="tools"><button class="wk" data-act="view" data-v="stats" title="Tasks done since Monday">✓ <b>' + wkDone + '</b> this week</button>' + (S.view === 'day' ? '<div class="prog"><span>' + done + ' of ' + todays.length + ' done</span><div class="bar"><i style="width:' + (todays.length ? done / todays.length * 100 : 0) + '%"></i></div></div>' : '') +
     (S.view === 'day' ? '<button class="btn rpbtn" data-act="replan" title="Plan the rest of this week again">Replan week</button><button class="iconbtn" data-act="print" aria-label="Print" title="Print (A4)">⎙</button>' : '') +
@@ -746,7 +813,7 @@ function renderTriage() {
       (!c ? '<label class="meta rv-cat">Category <select data-tgcat="' + t.id + '"><option value="">(none)</option>' + categories(t.list).map(function (k) { return '<option value="' + k.t.id + '">' + '· '.repeat(k.depth) + esc(k.t.text) + '</option>'; }).join('') + '</select></label>' : '') +
       '<div class="row">' +
       '<button class="btn pri" data-tg="today" data-id="' + t.id + '">' + (t.day === S.today ? 'Keep today' : 'Today') + '</button><button class="btn" data-tg="tomorrow" data-id="' + t.id + '">Tomorrow</button><button class="btn" data-tg="mon" data-id="' + t.id + '">Next Mon</button>' +
-      '<input type="date" data-tgdate="' + t.id + '" aria-label="Pick a day"><button class="btn" data-tg="nodate" data-id="' + t.id + '">No date</button>' +
+      dIn('data-tgdate="' + t.id + '" data-ok="tg" aria-label="Pick a day"', '', 'Day') + '<button class="btn" data-dateok>OK</button><button class="btn" data-tg="nodate" data-id="' + t.id + '">No date</button>' +
       '<button class="btn" data-tg="done" data-id="' + t.id + '">Done</button>' + (t.carried || (t.day && t.day < S.today) ? '<button class="btn" data-tg="doneprev" data-id="' + t.id + '" title="Ticked off as done on ' + esc(shortDate(prevWorkday())) + '">' + prevWorkdayLabel() + '</button>' : '') + '<button class="btn warn" data-tg="delete" data-id="' + t.id + '">Delete</button><button class="linkbtn" data-tg="skip" data-id="' + t.id + '">Skip</button></div></div>';
   }).join('') : '<div class="empty rv-empty">All reviewed ✓</div>';
 
@@ -822,14 +889,15 @@ function openDatePop(id, field, anchor) {
   var t = S.tasks[id]; if (!t) return;
   var m = document.createElement('div');
   m.className = 'menu'; m.id = 'menu'; m.style.width = '260px';
-  m.innerHTML = '<label>' + (field === 'deadline' ? 'Deadline' : 'Day') + '<input type="date" id="dp_in" value="' + esc(t[field]) + '"></label>' +
+  m.innerHTML = '<label>' + (field === 'deadline' ? 'Deadline' : 'Day') + ' (dd.mm.yyyy, then OK or Enter)</label><div class="row">' + dIn('id="dp_in" data-ok="dp"', t[field]) + '<button class="btn pri" data-dateok>OK</button></div>' +
     '<div class="row"><button class="btn" data-dp="today">Today</button><button class="btn" data-dp="tomorrow">Tomorrow</button><button class="btn" data-dp="mon">Next Mon</button><button class="btn" data-dp="sat">Saturday</button><button class="btn" data-dp="">' + (field === 'deadline' ? 'No deadline' : 'No date') + '</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
   m.style.top = fitTop(m, r) + 'px';
   m.style.left = Math.max(8, Math.min(window.scrollX + r.left - 100, document.documentElement.clientWidth - 270)) + 'px';
   m.dataset.id = id; m.dataset.f = field;
-  var inp = $('dp_in'); inp.focus();
+  var inp = $('dp_in'); inp.focus(); inp.select();
+  openCal(inp, t[field], function (iso) { applyDate(id, field, iso); });   // the calendar opens too: a click on a day saves it
 }
 function applyDate(id, field, value) {
   if (field === 'deadline') change([[id, { deadline: value }]]);
@@ -1188,7 +1256,7 @@ function renderSel() {
     '<button class="btn" data-act="bulk" data-to="today">Today</button><button class="btn" data-act="bulk" data-to="tomorrow">Tomorrow</button>' +
     '<button class="btn" data-act="bulk" data-to="mon">Next Monday</button><button class="btn" data-act="bulk" data-to="week">+1 week</button>' +
     '<button class="btn" data-act="bulk" data-to="sat">Saturday</button><button class="btn" data-act="bulk" data-to="">No date</button>' +
-    '<input type="date" id="bulkdate" aria-label="Move to date"><button class="btn" data-act="bulk" data-to="must">Must do</button>' +
+    dIn('id="bulkdate" data-ok="bulk" aria-label="Move to date"', '', 'Date') + '<button class="btn" data-dateok>OK</button><button class="btn" data-act="bulk" data-to="must">Must do</button>' +
     '<button class="btn" data-act="bulk" data-to="done">Done</button><button class="btn warn" data-act="bulk" data-to="delete">Delete</button><button class="linkbtn" data-act="clearsel">' + (S.selMode ? 'Cancel' : 'Clear') + '</button>';
 }
 // Select mode (phone): opened by a long-press on a task. Ends after a move, on Cancel, Esc or the phone's back swipe.
@@ -1246,9 +1314,9 @@ function openMenu(id, anchor) {
     // Top: "Done yesterday" (Done Friday on Sat–Mon), like the review card; only for tasks
     (t.kind === 'task' ? '<div class="row"><button class="btn" data-mact="doneprev" title="Ticked off as done on ' + esc(shortDate(prevWorkday())) + '">' + prevWorkdayLabel() + '</button></div>' : '') +
     '<div class="row"><button class="btn" data-mv="today">Today</button><button class="btn" data-mv="tomorrow">Tomorrow</button><button class="btn" data-mv="mon">Next Mon</button><button class="btn" data-mv="week">+1 week</button><button class="btn" data-mv="sat">Saturday</button><button class="btn" data-mv="">No date</button></div>' +
-    '<div class="two"><label>Day<input type="date" id="m_day" value="' + esc(t.day) + '"></label><label>Starts (fixed time)<input type="time" id="m_time" value="' + esc(String(t.time).split('-')[0]) + '"></label></div>' +
+    '<div class="two"><label>Day' + dIn('id="m_day"', t.day) + '</label><label>Starts (fixed time)<input type="time" id="m_time" value="' + esc(String(t.time).split('-')[0]) + '"></label></div>' +
     (t.kind === 'task' ? '<label>Backup days (only if not done by then)</label><input type="hidden" id="m_bk" value="' + esc(backups(t).join(',')) + '"><div class="bkchips" id="m_bkl">' + bkChips(backups(t)) + '</div>' +
-      '<div class="row"><input type="date" id="m_bkd" style="width:auto"><button class="btn" data-mact="bkadd">Add backup day</button></div>' : '') +
+      '<div class="row">' + dIn('id="m_bkd"', '') + '<button class="btn" data-mact="bkadd">Add backup day</button></div>' : '') +
     '<div class="two"><span></span><label>Ends (optional)<input type="time" id="m_end" value="' + esc(String(t.time).split('-')[1] || '') + '"></label></div>') +
     '<label>Text<textarea id="m_text" rows="2">' + esc(t.text) + '</textarea></label>' +
     (isCat ? '<label>' + (t.kind === 'category' ? 'Inside (parent category)' : 'Label inside') + '<select id="m_parent">' + (t.kind === 'category' ? '<option value="">(Top level)</option>' : '') +
@@ -1256,7 +1324,7 @@ function openMenu(id, anchor) {
     (t.kind === 'category' ? '<label>Sort tasks by<select id="m_sort">' + Object.keys(SORTS).map(function (k) { return '<option value="' + k + '"' + ((t.sort || 'own') === k ? ' selected' : '') + '>' + SORTS[k] + '</option>'; }).join('') + '</select></label>' +
       '<label>Colour</label><span class="swatches">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<button class="g' + n + (catColor(t) === n ? ' on' : '') + '" data-mcolor="' + n + '" aria-label="Colour ' + n + '"></button>'; }).join('') + '</span>' : '') +
     (isCat ? '' :
-      '<div class="two"><label>Deadline<input type="date" id="m_dl" value="' + esc(t.deadline) + '"></label><label>Counter (out of)<input type="number" id="m_cnt" min="0" value="' + esc(t.count_of) + '"></label></div>' +
+      '<div class="two"><label>Deadline' + dIn('id="m_dl"', t.deadline) + '</label><label>Counter (out of)<input type="number" id="m_cnt" min="0" value="' + esc(t.count_of) + '"></label></div>' +
       '<label>Tags (comma separated)<input id="m_tags" value="' + esc(shownTags(t).join(', ')) + '"></label>' +
       '<label>Note (short, shown in Claude\'s files)<input id="m_note" value="' + esc(t.note) + '"></label>' +
       '<label>Details (only shown when you open them; not in Claude\'s files)<textarea id="m_det" rows="3" placeholder="Where to go, contact info, links…">' + esc(t.details) + '</textarea></label>' +
@@ -1267,7 +1335,7 @@ function openMenu(id, anchor) {
       '<label>Category<select id="m_cat"><option value="">(none)</option>' + categories(t.list).map(function (c) { return '<option value="' + c.t.id + '"' + (topOrParent(t) === c.t.id ? ' selected' : '') + '>' + '· '.repeat(c.depth) + esc(c.t.text) + '</option>'; }).join('') + '</select></label>' +
       (t.work_of ? '<p class="mhint">Work session for "' + esc(S.tasks[t.work_of] ? S.tasks[t.work_of].text : t.text) + '". Ticking it off or deleting it leaves the big task as it is.</p>' : subOfField(t) +
         '<label>Work on it (a session for one day; the task itself stays)</label><div class="row"><button class="btn" data-mact="workon" data-d="today">Today</button><button class="btn" data-mact="workon" data-d="tomorrow">Tomorrow</button>' +
-        '<input type="date" id="m_wod" style="width:auto"><button class="btn" data-mact="workon" data-d="pick">Add</button></div>')) +
+        dIn('id="m_wod"', '') + '<button class="btn" data-mact="workon" data-d="pick">Add</button></div>')) +
     '<div class="row"><button class="btn pri" data-mact="save">Save</button>' + (isCat ? '' : '<button class="btn" data-mact="sub">+ Subtask</button>') + '<button class="btn warn" data-mact="del">Delete</button><button class="linkbtn" data-mact="close">Close</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
@@ -1304,7 +1372,7 @@ function openBulkMenu(ids, anchor) {
   var yn = function (id, cur, label) { return '<label>' + label + '<select id="' + id + '"><option value=""' + (cur === null ? ' selected' : '') + '>' + (cur === null ? '(mixed)' : '(keep)') + '</option><option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>Yes</option><option value="no"' + (cur === 'no' ? ' selected' : '') + '>No</option></select></label>'; };
   var m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
   m.innerHTML = '<b>' + ids.length + ' tasks</b>' +
-    '<div class="two"><label>Day<input type="date" id="b_day" value="' + esc(day || '') + '"' + (day === null ? ' placeholder="mixed"' : '') + '></label><label>Deadline<input type="date" id="b_dl" value="' + esc(dl || '') + '"></label></div>' +
+    '<div class="two"><label>Day' + dIn('id="b_day"', day || '', day === null ? 'mixed' : '') + '</label><label>Deadline' + dIn('id="b_dl"', dl || '') + '</label></div>' +
     '<div class="two">' + yn('b_must', must, 'Must do') + yn('b_if', ift, 'If time') + '</div>' +
     '<label>Tags shared by all (add or remove)<input id="b_tags" value="' + esc(shared.join(', ')) + '"></label>' +
     '<label>List<select id="b_list"><option value="">' + (list === null ? '(mixed)' : '(keep)') + '</option>' + Object.keys(LISTS).map(function (l) { return '<option value="' + l + '"' + (list === l ? ' selected' : '') + '>' + LISTS[l] + '</option>'; }).join('') + '</select></label>' +
@@ -1359,7 +1427,8 @@ function catPickSave(cat) {
 function bulkSave() {
   var m = $('menu'); if (!m || !m.dataset.bulk) return;
   var ids = m.dataset.bulk.split(',').filter(function (x) { return S.tasks[x]; }), init = JSON.parse(m.dataset.init);
-  var v = function (x) { return $(x).value; };
+  if (badDates(m)) return;
+  var v = function (x) { var el = $(x); return el.classList.contains('dfield') ? parseNo(el.value) : el.value; };
   var lower = function (a) { return a.map(function (x) { return x.toLowerCase(); }); };
   var newTags = v('b_tags').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
   var added = newTags.filter(function (x) { return lower(init.tags).indexOf(x.toLowerCase()) === -1; });
@@ -1391,7 +1460,8 @@ function bulkSave() {
 function topOrParent(t) { var p = S.tasks[t.parent]; return p && p.kind === 'category' ? p.id : (p && p.kind !== 'task' ? p.id : ''); }
 function closeMenu() { var m = $('menu'); if (m) m.remove(); }
 function menuSave(id) {
-  var t = S.tasks[id], v = function (x) { var el = $(x); return el ? el.value : undefined; };
+  if (badDates($('menu'))) return;
+  var t = S.tasks[id], v = function (x) { var el = $(x); return el ? (el.classList.contains('dfield') ? parseNo(el.value) : el.value) : undefined; };
   var patch = { text: v('m_text').trim() || t.text };
   if (t.kind === 'task' || t.kind === 'event') {
     patch.day = v('m_day'); patch.time = v('m_time') ? v('m_time') + (v('m_end') ? '-' + v('m_end') : '') : ''; patch.kind = v('m_time') ? 'event' : 'task';
@@ -1544,6 +1614,22 @@ function showResults(q) {
 // ---- Clicks (one listener for the whole page) ---------------------------------------
 document.addEventListener('mousedown', function (e) { if (e.shiftKey && e.target.closest('.main .task[data-id]')) e.preventDefault(); });
 document.addEventListener('click', function (e) {
+  // The small calendar: month arrows, a day (or week number), clicks inside it touch nothing else
+  var cp = $('calpop');
+  if (cp && e.target.closest('#calpop')) {
+    var cb = e.target.closest('[data-cal],[data-calday]');
+    if (cb && cb.dataset.cal) { var cd = new Date(Date.UTC(+cp._ym.slice(0, 4), +cp._ym.slice(5, 7) - 1 + Number(cb.dataset.cal), 1)); cp._ym = cd.toISOString().slice(0, 7); drawCal(cp); }
+    else if (cb) { var pick = cp._pick; closeCal(); pick(cb.dataset.calday); }
+    return;
+  }
+  if (cp && !e.target.closest('.dfield')) closeCal();
+  // OK next to a date field
+  var okb = e.target.closest('[data-dateok]');
+  if (okb) { var okf = okb.parentElement.querySelector('.dfield[data-ok]'); if (okf) dateOk(okf); return; }
+  // A click in a date field opens the calendar under it (a day picked there fills the field;
+  // fields that act straight away, like the review card's, then act as if OK was pressed)
+  var dfc = e.target.closest('.dfield');
+  if (dfc && !(dfc.id === 'dp_in' && cp)) openCal(dfc, parseNo(dfc.value) || '', function (iso) { dfc.value = noDate(iso); dfc.classList.remove('bad'); if (dfc.dataset.ok) dateOk(dfc); });
   var el = e.target.closest('[data-act],[data-mv],[data-mact],[data-dp],[data-tg],[data-tgbulk],[data-look],[data-mcolor]');
   var menu = $('menu');
   if (menu && !e.target.closest('#menu') && !(el && el.dataset.act === 'menu')) closeMenu();
@@ -1599,7 +1685,7 @@ document.addEventListener('click', function (e) {
     }
     if (a === 'bkadd' || a === 'bkrm') {
       var hv = $('m_bk'), cur = hv.value ? hv.value.split(',') : [];
-      if (a === 'bkadd') { var nd = $('m_bkd').value; if (!nd) { $('m_bkd').focus(); return; } if (cur.indexOf(nd) === -1) cur.push(nd); $('m_bkd').value = ''; }
+      if (a === 'bkadd') { var nd = readD('m_bkd'); if (nd === null) return; if (!nd) { $('m_bkd').focus(); return; } if (cur.indexOf(nd) === -1) cur.push(nd); $('m_bkd').value = ''; }
       else cur = cur.filter(function (x) { return x !== el.dataset.d; });
       cur.sort(); hv.value = cur.join(','); $('m_bkl').innerHTML = bkChips(cur); return;
     }
@@ -1610,7 +1696,7 @@ document.addEventListener('click', function (e) {
       delete S.autoDay[id0];
       change([[id0, dpatch]]); closeMenu(); toast(prevWorkdayLabel() + ' (Ctrl+Z to undo)'); return;
     }
-    if (a === 'workon') { var wd = el.dataset.d === 'pick' ? $('m_wod').value : bulkTarget(el.dataset.d); if (!wd) { $('m_wod').focus(); return; } makeSession(id0, wd); closeMenu(); return; }
+    if (a === 'workon') { var wd = el.dataset.d === 'pick' ? readD('m_wod') : bulkTarget(el.dataset.d); if (wd === null) return; if (!wd) { $('m_wod').focus(); return; } makeSession(id0, wd); closeMenu(); return; }
     if (a === 'sub') { var p = S.tasks[id0], nid = newId(); change([[nid, { list: p.list, parent: p.id, kind: 'task', text: 'New subtask', day: p.day, state: 'open', pos: String(Date.now()), source: 'App' }]]); closeMenu(); setTimeout(function () { startEdit(nid); }, 30); }
     return;
   }
@@ -1650,7 +1736,9 @@ document.addEventListener('click', function (e) {
   else if (act === 'replan') { S.list = S.view === 'lists' ? S.list : 'main'; S.view = 'lists'; S.replan = true; S.plan = false; S.replanPool = {}; render(); window.scrollTo(0, 0); }
   else if (act === 'replanclose') { S.replan = false; S.replanPool = {}; S.view = 'day'; S.date = S.today; render(); window.scrollTo(0, 0); }   // Done: back to today
   else if (act === 'replanclear') replanClear();
-  else if (act === 'view') { S.replan = false; S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.date || S.today; render(); }
+  else if (act === 'view') { S.replan = false; S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.today; render(); }   // Today = today (Shift keeps the day you were on)
+  else if (act === 'gotoday') { S.date = S.today; render(); }
+  else if (act === 'jump') openCal(el, S.date, function (iso) { S.date = iso; render(); }, 'nav');
   else if (act === 'prev' || act === 'next') { var step = S.view === 'day' ? 1 : 7; S.date = addDays(S.date, act === 'prev' ? -step : step); render(); }
   else if (act === 'goday') { S.date = el.dataset.d; S.view = 'day'; render(); }
   else if (act === 'weekend') { S.view = 'weekend'; render(); }
@@ -1714,9 +1802,7 @@ document.addEventListener('click', function (e) {
 });
 document.addEventListener('change', function (e) {
   var el = e.target;
-  if (el.id === 'bulkdate' && el.value) { moveTo(Object.keys(S.sel), el.value); if (S.selMode) endSelMode(); else { S.sel = {}; render(); } }
-  if (el.id === 'dp_in' && el.value) { var mm = $('menu'); if (mm) applyDate(mm.dataset.id, mm.dataset.f, el.value); }
-  if (el.dataset.tgdate && el.value) triageAct('date', el.value, el.dataset.tgdate);
+  // Date fields no longer save on change: they wait for OK or Enter (patch 17)
   if (el.dataset.tgsel && S.triage) { if (el.checked) S.triage.sel[el.dataset.tgsel] = true; else delete S.triage.sel[el.dataset.tgsel]; renderTriage(); }
   if (el.dataset.setting) { saveSetting(el.dataset.setting, el.value); }
   if (el.dataset.field) { var p = {}; p[el.dataset.field] = el.value; change([[el.dataset.id, p]]); }
@@ -1872,6 +1958,12 @@ document.addEventListener('keydown', function (e) {
     S.waitKey = null; render(); return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField) { e.preventDefault(); undo(); return; }
+  // Enter in a date field: OK (or the button next to it, like "Add backup day"); Escape closes the calendar first
+  if (e.target.classList && e.target.classList.contains('dfield')) {
+    if (e.key === 'Enter') { e.preventDefault(); if (e.target.dataset.ok) dateOk(e.target); else { closeCal(); var nb = e.target.nextElementSibling; if (nb && nb.tagName === 'BUTTON') nb.click(); } return; }
+    if (e.key === 'Escape' && $('calpop')) { e.preventDefault(); closeCal(); return; }
+  }
+  if (e.key === 'Escape' && $('calpop')) { closeCal(); return; }
   if (e.key === 'Escape') { if (S.triage) { triageAct('close'); return; } if (S.selMode) { endSelMode(); return; } closeMenu(); S.sel = {}; S.focus = null; var r = $('results'); if (r) r.remove(); if (inField) e.target.blur(); render(); return; }
   if (S.triage && e.key === 'Enter' && /^rv_mt_/.test(e.target.id)) { e.preventDefault(); triageAct('meet'); return; }
   if (S.triage) return;   // the morning card uses its own buttons
