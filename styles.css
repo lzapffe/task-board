@@ -159,6 +159,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .wt.ev { color: var(--accent); }
 .wkend { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .wkend .wide { grid-column: 1 / -1; min-height: 160px; }
+/* Weekend view (patch 19): plain sections like the Today view instead of boxes; ideas further down */
+.wkend.plain { gap: 30px 24px; align-items: start; }
+.wkend.plain .wcol { background: none; border: 0; border-radius: 0; padding: 0; min-height: 120px; gap: 2px; }
+.wkend.plain .wcol h3 { margin: 0; font-size: 1.12rem; font-weight: 800; letter-spacing: -0.005em; color: var(--ink); border-bottom: 1px solid var(--line); padding: 2px 0 7px; cursor: default; }
+.ideasblk { margin-top: 40px; }
+/* Weekend view: the tools go under the heading on the left and the Today/Week bar sits on the right, as on the Today view */
+@media (min-width: 821px) { .top.stack .tools { order: 3; flex-basis: 100%; } }
 
 /* ---- Categories view ---- */
 .cats { display: grid; gap: 2px; }

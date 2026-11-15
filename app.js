@@ -481,6 +481,7 @@ function renderTop() {
   var views = [['day', 'Today'], ['week', 'Week'], ['lists', 'Lists'], ['weekend', 'Weekend'], ['categories', 'Categories'], ['stats', 'Stats'], ['settings', ICON.gear]];
   var wkStart = mondayOf(S.today);
   var wkDone = all().filter(function (t) { return isTask(t) && t.state === 'done' && String(t.done_at).slice(0, 10) >= wkStart; }).length;
+  $('top').classList.toggle('stack', S.view === 'weekend');
   $('top').innerHTML =
     '<div class="day">' + (arrows ? '<button class="iconbtn" data-act="prev" aria-label="Back">‹</button>' : '') +
     (arrows ? '<button class="jumpbtn" data-act="jump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
@@ -936,7 +937,7 @@ function weekendSat() { var d = S.date; var w = dow(d); return w === 6 ? d : (w 
 function weekendView() {
   var sat = weekendSat(), sun = addDays(sat, 1);
   function col(title, list, drop) {
-    return '<div class="wcol' + (drop.wide ? ' wide' : '') + '" data-drop="' + drop.kind + '" data-day="' + drop.day + '" data-wk="' + drop.key + '"><h3>' + title + '<em>' + list.length + '</em></h3><ul class="tasks">' + list.map(function (t) { return taskRow(t, 0, { showPath: true }); }).join('') + '</ul></div>';
+    return '<div class="wcol' + (drop.wide ? ' wide' : '') + '" data-drop="' + drop.kind + '" data-day="' + drop.day + '" data-wk="' + drop.key + '"><h3>' + title + '</h3><ul class="tasks">' + list.map(function (t) { return taskRow(t, 0, { showPath: true }); }).join('') + '</ul></div>';
   }
   var sTasks = all().filter(function (t) { return isTask(t) && t.day === sat && t.span !== 'weekend'; });
   var suTasks = all().filter(function (t) { return isTask(t) && t.day === sun && t.span !== 'weekend'; });
@@ -947,10 +948,10 @@ function weekendView() {
     var c = topCat(t); var p = pathText(t).toLowerCase();
     return hasTag(t, 'personal') || p.indexOf('personal') !== -1 || (c && c.text.toLowerCase().indexOf('personal') !== -1);
   });
-  return '<div class="wkend">' + col('Saturday ' + pd(sat).getUTCDate(), wkSort(sat, 'sat', sTasks), { kind: 'day', day: sat, key: 'sat' }) + col('Sunday ' + pd(sun).getUTCDate(), wkSort(sat, 'sun', suTasks), { kind: 'day', day: sun, key: 'sun' }) +
+  return '<div class="wkend plain">' + col('Saturday ' + pd(sat).getUTCDate(), wkSort(sat, 'sat', sTasks), { kind: 'day', day: sat, key: 'sat' }) + col('Sunday ' + pd(sun).getUTCDate(), wkSort(sat, 'sun', suTasks), { kind: 'day', day: sun, key: 'sun' }) +
     col('This weekend (either day)', wkSort(sat, 'both', both), { kind: 'weekend', day: sat, wide: true, key: 'both' }) + '</div>' +
     (left.length ? '<div class="block"><div class="bh">Left over from the week (personal)</div><ul class="tasks">' + left.map(function (t) { return taskRow(t, 0, { showDay: true }); }).join('') + '</ul></div>' : '') +
-    '<div class="block"><div class="bh">Ideas</div><ul class="tasks">' + all().filter(function (t) { return t.list === 'ideas' && isTask(t) && t.state !== 'done' && !t.day; }).sort(function (a, b) { return Number(a.pos) - Number(b.pos); }).slice(0, 12).map(function (t) { return taskRow(t, 0); }).join('') + '</ul></div>';
+    '<div class="block ideasblk"><div class="bh">Ideas</div><ul class="tasks">' + all().filter(function (t) { return t.list === 'ideas' && isTask(t) && t.state !== 'done' && !t.day; }).sort(function (a, b) { return Number(a.pos) - Number(b.pos); }).slice(0, 12).map(function (t) { return taskRow(t, 0); }).join('') + '</ul></div>';
 }
 
 // Your own order in the weekend columns, saved in Settings ("wkorder") so it's the same on every device.
