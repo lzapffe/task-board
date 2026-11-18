@@ -484,7 +484,7 @@ function renderTop() {
   $('top').classList.toggle('stack', S.view === 'weekend');
   $('top').innerHTML =
     '<div class="day">' + (arrows ? '<button class="iconbtn" data-act="prev" aria-label="Back">‹</button>' : '') +
-    (arrows ? '<button class="jumpbtn" data-act="jump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
+    (arrows ? '<button class="jumpbtn" data-act="datejump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
     (arrows ? '<button class="iconbtn" data-act="next" aria-label="Forward">›</button>' : '') + '</div>' +
     '<nav class="tabs">' + views.map(function (v) { return '<button data-act="view" data-v="' + v[0] + '" data-drop="tab" class="' + (S.view === v[0] ? 'on' : '') + '"' + (v[0] === 'settings' ? ' aria-label="Settings"' : '') + '>' + v[1] + '</button>'; }).join('') + '</nav>' +
     '<div class="tools"><button class="wk" data-act="view" data-v="stats" title="Tasks done since Monday">✓ <b>' + wkDone + '</b> this week</button>' + (S.view === 'day' ? '<div class="prog"><span>' + done + ' of ' + todays.length + ' done</span><div class="bar"><i style="width:' + (todays.length ? done / todays.length * 100 : 0) + '%"></i></div></div>' : '') +
@@ -1737,7 +1737,7 @@ document.addEventListener('click', function (e) {
   else if (act === 'replanclear') replanClear();
   else if (act === 'view') { S.replan = false; S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.today; render(); }   // Today = today (Shift keeps the day you were on)
   else if (act === 'gotoday') { S.date = S.today; render(); }
-  else if (act === 'jump') openCal(el, S.date, function (iso) { S.date = iso; render(); }, 'nav');
+  else if (act === 'datejump') openCal(el, S.date, function (iso) { S.date = iso; render(); }, 'nav');   // the heading's calendar ("jump" = categories in the sidebar)
   else if (act === 'prev' || act === 'next') { var step = S.view === 'day' ? 1 : 7; S.date = addDays(S.date, act === 'prev' ? -step : step); render(); }
   else if (act === 'goday') { S.date = el.dataset.d; S.view = 'day'; render(); }
   else if (act === 'weekend') { S.view = 'weekend'; render(); }
