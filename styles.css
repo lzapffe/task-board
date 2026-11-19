@@ -164,7 +164,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .wkend.plain .wcol { background: none; border: 0; border-radius: 0; padding: 0; min-height: 120px; gap: 2px; }
 .wkend.plain .wcol h3 { margin: 0; font-size: 1.12rem; font-weight: 800; letter-spacing: -0.005em; color: var(--ink); border-bottom: 1px solid var(--line); padding: 2px 0 7px; cursor: default; }
 .ideasblk { margin-top: 40px; }
-/* Weekend view: the tools go under the heading on the left and the Today/Week bar sits on the right, as on the Today view */
+/* Top row in every view: the tools go under the heading on the left and the Today/Week bar sits on the right */
 @media (min-width: 821px) { .top.stack .tools { order: 3; flex-basis: 100%; } }
 
 /* ---- Categories view ---- */
@@ -378,6 +378,7 @@ li.details.l1 { margin-left: 64px; } li.details.l2 { margin-left: 92px; } li.det
 .plancols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .rpcols { grid-template-columns: repeat(var(--n, 5), minmax(0, 1fr)); }
 .replan .rptitle { margin-right: auto; font-size: 0.9rem; }
+.replan .rpwk { display: flex; gap: 6px; align-items: center; font-size: 0.82rem; font-weight: 700; color: var(--muted); cursor: pointer; }
 .replan .rpnote { margin: 4px 0 10px; font-size: 0.8rem; color: var(--muted); }
 .replan .rpnote b { color: var(--ink); }
 .replan .rpmust { border: 1px solid var(--must); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }

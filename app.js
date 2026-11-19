@@ -481,7 +481,7 @@ function renderTop() {
   var views = [['day', 'Today'], ['week', 'Week'], ['lists', 'Lists'], ['weekend', 'Weekend'], ['categories', 'Categories'], ['stats', 'Stats'], ['settings', ICON.gear]];
   var wkStart = mondayOf(S.today);
   var wkDone = all().filter(function (t) { return isTask(t) && t.state === 'done' && String(t.done_at).slice(0, 10) >= wkStart; }).length;
-  $('top').classList.toggle('stack', S.view === 'weekend');
+  $('top').classList.add('stack');   // every view: Today/Week bar on the right, tools under the heading (patch 21)
   $('top').innerHTML =
     '<div class="day">' + (arrows ? '<button class="iconbtn" data-act="prev" aria-label="Back">‹</button>' : '') +
     (arrows ? '<button class="jumpbtn" data-act="datejump" title="Go to another date or week"><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></button>' : '<div><small>' + esc(sub) + '</small><h1>' + esc(title) + '</h1></div>') +
@@ -898,6 +898,27 @@ function openDatePop(id, field, anchor) {
   var inp = $('dp_in'); inp.focus(); inp.select();
   openCal(inp, t[field], function (iso) { applyDate(id, field, iso); });   // the calendar opens too: a click on a day saves it
 }
+// ---- Duplicate (⋯ menu, patch 21) ---------------------------------------------------
+// A copy right under the original: same text, list, category, day, deadline, must, tags, note, details;
+// always not done, no backup days. Subtasks are copied too (not done). Returns the copy's id.
+function duplicateTask(id) {
+  var src = S.tasks[id], list = [];
+  var KEEP = ['list', 'kind', 'text', 'day', 'time', 'span', 'deadline', 'must', 'tags', 'note', 'details', 'count_of', 'color', 'sort', 'work_of'];
+  function copyOf(t, parent, pos) {
+    var nid = newId(), o = { parent: parent, pos: pos, state: 'open', source: 'App' };
+    KEEP.forEach(function (k) { if (t[k]) o[k] = t[k]; });
+    if (o.count_of) o.count = '0';
+    list.push([nid, o]);
+    kids(t.list, t.id).forEach(function (k) { if (k.kind === 'task' || k.kind === 'event') copyOf(k, nid, k.pos); });
+    return nid;
+  }
+  // Position: halfway between the original and the next one in the same place
+  var sibs = kids(src.list, src.parent), i = sibs.map(function (x) { return x.id; }).indexOf(id), a = Number(src.pos) || Date.now();
+  var nx = sibs[i + 1], pos = nx ? (a + Number(nx.pos)) / 2 : a + 1;
+  var first = copyOf(src, src.parent || '', String(pos));
+  change(list);
+  return first;
+}
 function applyDate(id, field, value) {
   if (field === 'deadline') change([[id, { deadline: value }]]);
   else moveTo([id], value);
@@ -986,15 +1007,17 @@ function wkDrop(ids, tgt, below) {
 // ones waiting to be carried over), with a column for each day left. "Clear and start over" takes them
 // all off their days (fixed-time tasks stay); you drag back what fits. Leftovers keep no date.
 function weekEndDay() { var w = dow(S.today); return addDays(S.today, w === 0 ? 0 : 7 - w); }
+// Last day in the replan: Friday, unless "Include weekend" is ticked (on Sat/Sun the weekend is the rest of the week)
+function replanEnd() { var w = dow(S.today); return (w >= 1 && w <= 5 && !S.replanWk) ? addDays(S.today, 5 - w) : weekEndDay(); }
 function inReplan(t) {
   if (!t || !isTask(t) || t.state === 'done' || t.work_of || t.list !== S.list) return false;
   if (S.replanPool && S.replanPool[t.id]) return true;
-  var end = weekEndDay();
+  var end = replanEnd();
   if (t.day && t.day <= end) return true;
   return backups(t).some(function (b) { return b >= S.today && b <= end; });
 }
 function replanClear() {
-  var end = weekEndDay();
+  var end = replanEnd();
   var ids = all().filter(function (t) { return inReplan(t) && t.day && t.day <= end && !t.time; }).map(function (t) { return t.id; });
   if (!ids.length) { toast('Nothing to clear'); return; }
   if (!confirm('Take ' + ids.length + ' task' + (ids.length > 1 ? 's' : '') + ' off their days so you can plan the rest of the week again?\nFixed-time tasks stay. Ctrl+Z undoes it.')) return;
@@ -1009,6 +1032,7 @@ function replanView() {
   var left = mine.filter(function (t) { return !(t.day >= S.today); }).length;
   var html = '<div class="listwrap replan"><div>';
   html += '<div class="listbar"><b class="rptitle">Replan the rest of the week</b><button class="btn" data-act="replanclear" title="Take this list\'s tasks off their days (fixed times stay)">Clear and start over</button>' +
+    (dow(S.today) >= 1 && dow(S.today) <= 5 ? '<label class="rpwk"><input type="checkbox" data-act="replanwk"' + (S.replanWk ? ' checked' : '') + '> Include weekend</label>' : '') +
     '<button class="btn pri" data-act="replanclose">Done</button></div>';
   html += '<p class="rpnote">' + mine.length + ' task' + (mine.length === 1 ? '' : 's') + ' in ' + esc(LISTS[S.list]) + (left ? ' · <b>' + left + ' without a day</b>' : '') + '. Placed ones are dimmed. What you leave without a day stays in the list.</p>';
   var musts = mine.filter(function (t) { return t.must; });
@@ -1040,7 +1064,7 @@ function replanColumns() {
   var weekday = w >= 1 && w <= 5;
   while (d <= (weekday ? addDays(S.today, 5 - w) : end)) { days.push(d); d = addDays(d, 1); }
   var cols = days.map(function (d) { return { day: d, kind: 'day', title: shortDate(d), days: [d] }; });
-  if (weekday) cols.push({ day: addDays(S.today, 6 - w), kind: 'weekend', title: 'Weekend', days: [addDays(S.today, 6 - w), end] });
+  if (weekday && S.replanWk) cols.push({ day: addDays(S.today, 6 - w), kind: 'weekend', title: 'Weekend', days: [addDays(S.today, 6 - w), end] });
   var html = '<div class="dropcol"><h4>Drop on a day</h4>';
   cols.forEach(function (c) {
     var on = function (t) { return c.days.some(function (x) { return onDay(t, x); }); };
@@ -1335,7 +1359,7 @@ function openMenu(id, anchor) {
       (t.work_of ? '<p class="mhint">Work session for "' + esc(S.tasks[t.work_of] ? S.tasks[t.work_of].text : t.text) + '". Ticking it off or deleting it leaves the big task as it is.</p>' : subOfField(t) +
         '<label>Work on it (a session for one day; the task itself stays)</label><div class="row"><button class="btn" data-mact="workon" data-d="today">Today</button><button class="btn" data-mact="workon" data-d="tomorrow">Tomorrow</button>' +
         dIn('id="m_wod"', '') + '<button class="btn" data-mact="workon" data-d="pick">Add</button></div>')) +
-    '<div class="row"><button class="btn pri" data-mact="save">Save</button>' + (isCat ? '' : '<button class="btn" data-mact="sub">+ Subtask</button>') + '<button class="btn warn" data-mact="del">Delete</button><button class="linkbtn" data-mact="close">Close</button></div>';
+    '<div class="row"><button class="btn pri" data-mact="save">Save</button>' + (isCat ? '' : '<button class="btn" data-mact="sub">+ Subtask</button><button class="btn" data-mact="dup">Duplicate</button>') + '<button class="btn warn" data-mact="del">Delete</button><button class="linkbtn" data-mact="close">Close</button></div>';
   document.body.appendChild(m);
   var r = anchor.getBoundingClientRect();
   m.style.top = fitTop(m, r) + 'px';
@@ -1696,6 +1720,7 @@ document.addEventListener('click', function (e) {
       change([[id0, dpatch]]); closeMenu(); toast(prevWorkdayLabel() + ' (Ctrl+Z to undo)'); return;
     }
     if (a === 'workon') { var wd = el.dataset.d === 'pick' ? readD('m_wod') : bulkTarget(el.dataset.d); if (wd === null) return; if (!wd) { $('m_wod').focus(); return; } makeSession(id0, wd); closeMenu(); return; }
+    if (a === 'dup') { var nd0 = duplicateTask(id0); closeMenu(); toast('Duplicated (Ctrl+Z to undo)'); setTimeout(function () { startEdit(nd0); }, 30); return; }
     if (a === 'sub') { var p = S.tasks[id0], nid = newId(); change([[nid, { list: p.list, parent: p.id, kind: 'task', text: 'New subtask', day: p.day, state: 'open', pos: String(Date.now()), source: 'App' }]]); closeMenu(); setTimeout(function () { startEdit(nid); }, 30); }
     return;
   }
@@ -1732,7 +1757,8 @@ document.addEventListener('click', function (e) {
   else if (act === 'guidance') { saveSetting('guidance', guide() ? 'off' : 'on'); render(); }
   else if (act === 'bo') { moveStdBlock(id, Number(el.dataset.dir)); }
   else if (act === 'bkok') { saveSetting('bknote_ok', S.today + '|' + el.dataset.ids); if (S.triage) renderTriage(); render(); }
-  else if (act === 'replan') { S.list = S.view === 'lists' ? S.list : 'main'; S.view = 'lists'; S.replan = true; S.plan = false; S.replanPool = {}; render(); window.scrollTo(0, 0); }
+  else if (act === 'replan') { S.list = S.view === 'lists' ? S.list : 'main'; S.view = 'lists'; S.replan = true; S.plan = false; S.replanPool = {}; S.replanWk = false; render(); window.scrollTo(0, 0); }
+  else if (act === 'replanwk') { S.replanWk = el.checked; render(); }
   else if (act === 'replanclose') { S.replan = false; S.replanPool = {}; S.view = 'day'; S.date = S.today; render(); window.scrollTo(0, 0); }   // Done: back to today
   else if (act === 'replanclear') replanClear();
   else if (act === 'view') { S.replan = false; S.view = el.dataset.v; if (S.view === 'day' && !e.shiftKey) S.date = S.today; render(); }   // Today = today (Shift keeps the day you were on)
